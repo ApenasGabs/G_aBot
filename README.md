@@ -1,31 +1,76 @@
-# Bot_ADS
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
-### Instalação
+# G_aBot
 
-Para poder usar o bot sera necessario que voce tenha instalado o node caso nao tenha baixe aqui https://nodejs.org/en/
+Bot de WhatsApp com Baileys + SQLite para monitorar mensagens em grupos e encaminhar ofertas para usuarios com filtros cadastrados.
 
-Feito isso, abra seu terminal passe os comandos 
+## Requisitos
 
-```sh
-npm install venom-bot
+- Node.js 20+
+- npm
+
+## Instalar
+
+```bash
+npm install
 ```
 
-Apos terminar de baixar todos os recursos, inicie o arquivo index.js com o comando
+## Rodar local
 
-```sh
-node index.js
+```bash
+npm start
 ```
-Na primeira vez ele ira gerar um QR code para o wpp web apos isso nao pedira mais.
 
-Veja o guia completo em https://github.com/orkestral/venom#readme
+Na primeira execucao, escaneie o QR code no terminal.
+
+Arquivos gerados em runtime:
+
+- `auth_info/` (sessao Baileys)
+- `data/bot.db` (SQLite)
+
+## Comandos do bot (apenas no privado)
+
+- `/` ou `/menu` ou `/ajuda`
+- `/cadastro`
+- `/add [termo]`
+- `/remover [termo]`
+- `/meusfiltros` (aliases: `/filtros` e `/meuscadastros`)
+
+## Regras de funcionamento
+
+- Comandos sao processados somente em conversa privada.
+- Em grupos, o bot monitora mensagens de texto.
+- Cada mensagem e normalizada e hashada (MD5) para evitar duplicidade.
+- Quando um termo cadastrado der match, o bot envia alerta no privado via fila (throttle).
+
+## PM2
+
+Iniciar:
+
+```bash
+npm run pm2:start
+```
+
+Status:
+
+```bash
+npm run pm2:status
+```
+
+Logs:
+
+```bash
+npm run pm2:logs
+```
+
+Parar:
+
+```bash
+npm run pm2:stop
+```
+
+## Utilitarios
+
+Validar sintaxe:
+
+```bash
+npm run check
+```
