@@ -221,3 +221,97 @@ export async function ensureOllamaOnline(instanceName = getDefaultInstanceName()
 export function listConfiguredInstanceNames() {
   return Object.keys(BOT_CONFIG.ollamaInstances || {});
 }
+
+export async function askOllamaInstance({
+  prompt,
+  instanceName = getDefaultInstanceName(),
+  model,
+  system,
+}) {
+  const config = getInstanceConfig(instanceName);
+  if (!config) {
+    return {
+      ok: false,
+      instanceName,
+      error: `Instancia '${instanceName}' nao configurada`,
+    };
+  }
+
+  const baseUrl = (config.baseUrl || "").replace(/\/$/, "");
+  const selectedModel =
+    model ||
+    config.defaultModel ||
+    process.env.COUPON_AI_MODEL ||
+    "qwen2.5:1.5b";
+
+  if (!prompt || !prompt.trim()) {
+    return {
+      ok: false,
+      instanceName,
+      model: selectedModel,
+      error: "Prompt vazio",
+    };
+  }
+
+  try {
+    const response = await fetchWithTimeout(`${baseUrl}/api/generate`, 45000);
+    if (response && response.ok) {
+      // endpoint existe, segue fluxo normal abaixo
+    }
+  } catch {
+    // validação opcional de conectividade, segue para chamada principal
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/generate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        prompt: prompt.trim(),
+        system: system || undefined,
+        stream: false,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        ok: false,
+        instanceName,
+        model: selectedModel,
+        error: `HTTP ${response.status}: ${errorText}`,
+      };
+    }
+
+    const data = await response.json();
+    const answer = (data.response || "").trim();
+
+    if (!answer) {
+      return {
+        ok: false,
+        instanceName,
+        model: selectedModel,
+        error: "Resposta vazia do modelo",
+      };
+    }
+
+    return {
+      ok: true,
+      instanceName,
+      model: selectedModel,
+      answer,
+      promptEvalCount: data.prompt_eval_count || null,
+      evalCount: data.eval_count || null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      instanceName,
+      model: selectedModel,
+      error: error.message,
+    };
+  }
+}

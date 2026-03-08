@@ -1,4 +1,5 @@
 import {
+  askOllamaInstance,
   controlOllamaInstance,
   getOllamaInstanceStatus,
   listConfiguredInstanceNames,
@@ -14,7 +15,8 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     console.log(`[ADMIN CMD] Resposta enviada com sucesso`);
   };
 
-  const trimmed = text.trim().toLowerCase();
+  const rawTrimmed = text.trim();
+  const trimmed = rawTrimmed.toLowerCase();
 
   const tokens = trimmed.split(/\s+/);
   const firstTokenNoSlash = (tokens[0] || "").replace(/^\//, "");
@@ -37,6 +39,7 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     adm11: "/adm ia stop",
     adm12: "/adm ia restart",
     adm13: "/adm ia instancias",
+    adm14: "/adm ia ask",
   };
 
   if (adminAliases[firstTokenNoSlash]) {
@@ -123,6 +126,12 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     return;
   }
 
+  const askArgs = extractAskArgs(rawTrimmed);
+  if (askArgs) {
+    await handleOllamaAsk(reply, askArgs);
+    return;
+  }
+
   // Comando /adm aprovar [id] ou /adm rejeitar [id]
   const approveMatch = normalizedCommand.match(/^\/adm\s+aprovar\s+([gs])\s*(\d+)$/);
   if (approveMatch) {
@@ -193,6 +202,7 @@ async function showAdminMenu(reply) {
       "adm11 /adm ia stop [instancia]",
       "adm12 /adm ia restart [instancia]",
       "adm13 /adm ia instancias",
+      "adm14 /adm ia ask [instancia::]pergunta",
       "",
       "Gerenciar:",
       "adm5 [tipo][id] /adm aprovar [tipo][id]",
@@ -214,11 +224,79 @@ async function showOllamaMenu(reply) {
       "adm11 [instancia] - stop",
       "adm12 [instancia] - restart",
       "adm13 - listar instancias",
+      "adm14 [instancia::]pergunta - testar prompt",
       "",
       "Exemplos:",
       "adm9",
       "adm10 local",
       "adm12 local",
+      "adm14 qual o melhor cupom da mensagem X?",
+      "adm14 local::extraia cupom e loja desta mensagem: ...",
+    ].join("\n")
+  );
+}
+
+function extractAskArgs(rawText) {
+  const directAlias = rawText.match(/^\/?adm14\s+([\s\S]+)$/i);
+  if (directAlias?.[1]) {
+    return directAlias[1].trim();
+  }
+
+  const full = rawText.match(/^\/?adm(?:in)?\s+ia\s+(?:ask|perguntar|prompt)\s+([\s\S]+)$/i);
+  if (full?.[1]) {
+    return full[1].trim();
+  }
+
+  return null;
+}
+
+function parseAskPayload(input) {
+  const value = (input || "").trim();
+  if (!value) {
+    return { instanceName: "local", prompt: "" };
+  }
+
+  if (value.includes("::")) {
+    const [left, ...rest] = value.split("::");
+    const maybeInstance = left.trim();
+    const prompt = rest.join("::").trim();
+    if (maybeInstance && prompt) {
+      return { instanceName: maybeInstance, prompt };
+    }
+  }
+
+  return { instanceName: "local", prompt: value };
+}
+
+async function handleOllamaAsk(reply, askInput) {
+  const { instanceName, prompt } = parseAskPayload(askInput);
+
+  if (!prompt) {
+    await reply("Uso: adm14 [instancia::]pergunta\nEx: adm14 local::extraia cupom e loja desta mensagem");
+    return;
+  }
+
+  await reply(`Enviando pergunta para o modelo (${instanceName})...`);
+
+  const result = await askOllamaInstance({
+    instanceName,
+    prompt,
+  });
+
+  if (!result.ok) {
+    await reply(`❌ Falha na consulta ao modelo: ${result.error}`);
+    return;
+  }
+
+  const answer = result.answer.length > 1500
+    ? `${result.answer.slice(0, 1500)}\n...[resposta truncada]`
+    : result.answer;
+
+  await reply(
+    [
+      `✅ Resposta do modelo (${result.instanceName} | ${result.model})`,
+      "",
+      answer,
     ].join("\n")
   );
 }

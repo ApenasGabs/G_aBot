@@ -330,13 +330,18 @@ export async function initWhatsappBot({
               });
 
               for (const interest of interestedUsers) {
-                const couponAlert = [
+                const couponAlertParts = [
                   "Novo cupom detectado!",
-                  `Loja: ${detectedStore}`,
                   `Codigo: ${couponItem.code}`,
                   `Grupo: ${groupName}`,
                   `Confianca: ${couponItem.confidence}%`,
-                ].join("\n");
+                ];
+
+                if (detectedStore !== "Loja nao identificada") {
+                  couponAlertParts.splice(1, 0, `Loja: ${detectedStore}`);
+                }
+
+                const couponAlert = couponAlertParts.join("\n");
 
                 dispatchQueue.enqueue({
                   chatId: interest.user_id,

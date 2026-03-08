@@ -390,11 +390,21 @@ export async function handlePrivateCommand({
       calculateRecencyEmoji,
       detectStoreFromText,
     } = await import("../services/couponExtractor.js");
-    const lines = recentCoupons.map((c) => {
+    const lines = recentCoupons
+      .map((c) => {
       const emoji = calculateRecencyEmoji(Number(c.last_seen_timestamp));
       const store = detectStoreFromText(c.message_text || "", c.group_name || "");
+      if (store === "Loja nao identificada") {
+        return null;
+      }
       return `${emoji} ${c.code} | ${store}`;
-    });
+      })
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      await reply("Nenhum cupom com loja identificada no momento.");
+      return;
+    }
 
     await reply(`Cupons recentes:\n\n${lines.join("\n")}`);
     return;
@@ -416,11 +426,21 @@ export async function handlePrivateCommand({
       calculateRecencyEmoji,
       detectStoreFromText,
     } = await import("../services/couponExtractor.js");
-    const lines = results.map((c) => {
+    const lines = results
+      .map((c) => {
       const emoji = calculateRecencyEmoji(Number(c.last_seen_timestamp));
       const store = detectStoreFromText(c.message_text || "", c.group_name || "");
+      if (store === "Loja nao identificada") {
+        return null;
+      }
       return `${emoji} ${c.code} | ${store}`;
-    });
+      })
+      .filter(Boolean);
+
+    if (lines.length === 0) {
+      await reply(`Nao encontrei cupons com loja identificada para "${argsText}".`);
+      return;
+    }
 
     await reply(`Cupons para "${argsText}":\n\n${lines.join("\n")}`);
     return;
