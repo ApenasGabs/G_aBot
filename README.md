@@ -19,6 +19,12 @@ npm install
 npm start
 ```
 
+Para receber sugestoes de grupos em um grupo de administracao, configure:
+
+```bash
+BOT_ADMIN_GROUP_ID="1203630xxxxxxxxx@g.us" npm start
+```
+
 Na primeira execucao, escaneie o QR code no terminal.
 
 Arquivos gerados em runtime:
@@ -28,11 +34,22 @@ Arquivos gerados em runtime:
 
 ## Comandos do bot (apenas no privado)
 
-- `/` ou `/menu` ou `/ajuda`
-- `/cadastro`
-- `/add [termo]`
-- `/remover [termo]`
-- `/meusfiltros` (aliases: `/filtros` e `/meuscadastros`)
+**Filtros de ofertas:**
+- `/cadastro` - ativa seu cadastro
+- `/add [termo]` - adiciona um filtro
+- `/remover [termo]` - remove um filtro
+- `/meusfiltros` (aliases: `/filtros`, `/meuscadastros`) - lista seus filtros
+
+**Cupons:**
+- `/cupons` - lista cupons recentes (🔥 menos de 30min, ⏰ menos de 2h, 🧊 mais de 24h)
+- `/cupom [loja]` - busca cupons de uma loja específica
+- `/seguircupom [loja]` - cadastra interesse em cupons de uma loja
+- `/pararcupom [loja]` - remove interesse em cupons de uma loja
+- `/meuscupons` - lista lojas que você segue
+
+**Outros:**
+- `/` ou `/menu` ou `/ajuda` - mostra menu de comandos
+- `/sugerirgrupo [link-do-grupo]` - sugere grupo para monitoramento
 
 ## Regras de funcionamento
 

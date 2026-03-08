@@ -22,6 +22,7 @@ module.exports = {
       autorestart: true,
       max_restarts: 10,
       restart_delay: 2000,
+      env_file: ".env",
       env: {
         NODE_ENV: "production",
       },
