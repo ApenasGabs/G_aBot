@@ -51,6 +51,22 @@ export function createRepo(db) {
     VALUES (?, ?, ?, ?, ?, 'pending')
   `);
 
+  const findGroupSuggestionByInviteCodeStmt = db.prepare(`
+    SELECT
+      id,
+      user_id,
+      user_name,
+      group_link,
+      invite_code,
+      group_name,
+      status,
+      created_at
+    FROM group_suggestions
+    WHERE invite_code = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `);
+
   const addGeneralSuggestionStmt = db.prepare(`
     INSERT INTO general_suggestions (
       user_id,
@@ -70,9 +86,10 @@ export function createRepo(db) {
       group_link,
       invite_code,
       group_name,
+      status,
       created_at
     FROM group_suggestions
-    WHERE status = 'pending'
+    WHERE status IN ('pending', 'read')
     ORDER BY created_at DESC
     LIMIT ?
   `);
@@ -84,12 +101,57 @@ export function createRepo(db) {
       user_name,
       suggestion_text,
       suggestion_type,
+      status,
       created_at
+    FROM general_suggestions
+    WHERE status IN ('pending', 'read')
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const listPendingGroupSuggestionsToMarkReadStmt = db.prepare(`
+    SELECT id, user_id, user_name, group_name
+    FROM group_suggestions
+    WHERE status = 'pending'
+    ORDER BY created_at DESC
+    LIMIT ?
+  `);
+
+  const listPendingGeneralSuggestionsToMarkReadStmt = db.prepare(`
+    SELECT id, user_id, user_name, suggestion_text
     FROM general_suggestions
     WHERE status = 'pending'
     ORDER BY created_at DESC
     LIMIT ?
   `);
+
+  const markGroupSuggestionAsReadByIdStmt = db.prepare(`
+    UPDATE group_suggestions
+    SET status = 'read'
+    WHERE id = ? AND status = 'pending'
+  `);
+
+  const markGeneralSuggestionAsReadByIdStmt = db.prepare(`
+    UPDATE general_suggestions
+    SET status = 'read'
+    WHERE id = ? AND status = 'pending'
+  `);
+
+  const markPendingGroupSuggestionsAsReadTx = db.transaction((limit) => {
+    const rows = listPendingGroupSuggestionsToMarkReadStmt.all(limit);
+    for (const row of rows) {
+      markGroupSuggestionAsReadByIdStmt.run(row.id);
+    }
+    return rows;
+  });
+
+  const markPendingGeneralSuggestionsAsReadTx = db.transaction((limit) => {
+    const rows = listPendingGeneralSuggestionsToMarkReadStmt.all(limit);
+    for (const row of rows) {
+      markGeneralSuggestionAsReadByIdStmt.run(row.id);
+    }
+    return rows;
+  });
 
   const updateGroupSuggestionStatusStmt = db.prepare(`
     UPDATE group_suggestions
@@ -101,6 +163,35 @@ export function createRepo(db) {
     UPDATE general_suggestions
     SET status = ?
     WHERE id = ?
+  `);
+
+  const getGroupSuggestionByIdStmt = db.prepare(`
+    SELECT
+      id,
+      user_id,
+      user_name,
+      group_link,
+      invite_code,
+      group_name,
+      status,
+      created_at
+    FROM group_suggestions
+    WHERE id = ?
+    LIMIT 1
+  `);
+
+  const getGeneralSuggestionByIdStmt = db.prepare(`
+    SELECT
+      id,
+      user_id,
+      user_name,
+      suggestion_text,
+      suggestion_type,
+      status,
+      created_at
+    FROM general_suggestions
+    WHERE id = ?
+    LIMIT 1
   `);
 
   const listAllKeywordRowsStmt = db.prepare(`
@@ -261,6 +352,9 @@ export function createRepo(db) {
       );
       return Number(result.lastInsertRowid);
     },
+    findGroupSuggestionByInviteCode(inviteCode) {
+      return findGroupSuggestionByInviteCodeStmt.get(inviteCode) || null;
+    },
     addGeneralSuggestion({ userId, userName, suggestionText, suggestionType = 'general' }) {
       const result = addGeneralSuggestionStmt.run(
         userId,
@@ -275,6 +369,18 @@ export function createRepo(db) {
     },
     listPendingGeneralSuggestions(limit = 20) {
       return listPendingGeneralSuggestionsStmt.all(limit);
+    },
+    markPendingGroupSuggestionsAsRead(limit = 20) {
+      return markPendingGroupSuggestionsAsReadTx(limit);
+    },
+    markPendingGeneralSuggestionsAsRead(limit = 20) {
+      return markPendingGeneralSuggestionsAsReadTx(limit);
+    },
+    getGroupSuggestionById(id) {
+      return getGroupSuggestionByIdStmt.get(id) || null;
+    },
+    getGeneralSuggestionById(id) {
+      return getGeneralSuggestionByIdStmt.get(id) || null;
     },
     updateGroupSuggestionStatus(id, status) {
       const result = updateGroupSuggestionStatusStmt.run(status, id);

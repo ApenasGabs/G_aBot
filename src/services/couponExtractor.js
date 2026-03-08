@@ -97,10 +97,18 @@ function extractCouponsRegex(text) {
 
   const coupons = [...bestByCode.values()].filter((c) => c.confidence >= 50);
 
+  const summaryWithoutAI = coupons.length > 0
+    ? `Resumo sem IA: ${coupons
+        .map((c) => `codigo=${c.code}, confianca=${c.confidence}%`)
+        .join(" | ")}.`
+    : "Resumo sem IA: nenhum cupom valido encontrado.";
+
   return {
     coupons,
     isExhausted,
     source: 'regex',
+    summaryWithAI: null,
+    summaryWithoutAI,
   };
 }
 
@@ -140,6 +148,8 @@ export async function extractCoupons(text, groupName = '') {
           source: 'ai',
           aiStore: aiResult.store_name, // Loja identificada pela IA
           aiReasoning: aiResult.reasoning,
+          summaryWithAI: aiResult.summary_with_ai || null,
+          summaryWithoutAI: aiResult.summary_without_ai || null,
         };
       }
       

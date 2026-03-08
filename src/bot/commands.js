@@ -3,6 +3,52 @@ const userSessions = new Map();
 
 export function parseCommand(text) {
   const trimmed = text.trim();
+  const tokens = trimmed.split(/\s+/);
+  const firstTokenRaw = tokens[0] || "";
+  const firstToken = firstTokenRaw.toLowerCase();
+  const firstTokenNoSlash = firstToken.replace(/^\//, "");
+  const argsTextFromTokens = tokens.slice(1).join(" ").trim();
+
+  const commandAliases = {
+    // Sequencial global
+    c1: "/menu",
+    c2: "/cadastro",
+    c3: "/add",
+    c4: "/remover",
+    c5: "/meusfiltros",
+    c6: "/cupons",
+    c7: "/cupom",
+    c8: "/seguircupom",
+    c9: "/pararcupom",
+    c10: "/meuscupons",
+    c11: "/sugerirgrupo",
+    c12: "/sugerir",
+
+    // Categoria filtros
+    cf1: "/add",
+    cf2: "/remover",
+    cf3: "/meusfiltros",
+
+    // Categoria cupons
+    cc1: "/cupons",
+    cc2: "/cupom",
+    cc3: "/seguircupom",
+    cc4: "/pararcupom",
+    cc5: "/meuscupons",
+
+    // Categoria sugestoes
+    cs1: "/sugerirgrupo",
+    cs2: "/sugerir",
+  };
+
+  if (commandAliases[firstTokenNoSlash]) {
+    return {
+      command: commandAliases[firstTokenNoSlash],
+      argsText: argsTextFromTokens,
+      isAlias: true,
+      aliasUsed: firstTokenNoSlash,
+    };
+  }
   
   // Aceita números simples (1-9)
   if (/^[1-9]$/.test(trimmed)) {
@@ -49,6 +95,14 @@ function extractInviteCode(link) {
   return match ? match[1] : null;
 }
 
+function suggestionStatusLabel(status) {
+  if (status === "pending") return "pendente";
+  if (status === "read") return "lida";
+  if (status === "approved") return "aprovada";
+  if (status === "rejected") return "rejeitada";
+  return status || "desconhecido";
+}
+
 export async function handlePrivateCommand({
   client,
   repo,
@@ -75,6 +129,20 @@ export async function handlePrivateCommand({
   if (session?.context === "suggest_group" && text.includes("chat.whatsapp.com")) {
     const inviteCode = extractInviteCode(text);
     if (inviteCode) {
+      const duplicate = repo.findGroupSuggestionByInviteCode(inviteCode);
+      if (duplicate) {
+        const statusText = suggestionStatusLabel(duplicate.status);
+        await reply(
+          [
+            "⚠️ Esse grupo ja foi sugerido antes.",
+            `Status atual: ${statusText}`,
+            `ID: g${duplicate.id}`,
+          ].join("\n")
+        );
+        userSessions.delete(chatId);
+        return;
+      }
+
       let groupName = null;
       if (resolveInviteGroupName) {
         groupName = await resolveInviteGroupName(inviteCode);
@@ -243,6 +311,19 @@ export async function handlePrivateCommand({
       return;
     }
 
+    const duplicate = repo.findGroupSuggestionByInviteCode(inviteCode);
+    if (duplicate) {
+      const statusText = suggestionStatusLabel(duplicate.status);
+      await reply(
+        [
+          "⚠️ Esse grupo ja foi sugerido antes.",
+          `Status atual: ${statusText}`,
+          `ID: g${duplicate.id}`,
+        ].join("\n")
+      );
+      return;
+    }
+
     let groupName = null;
     if (resolveInviteGroupName) {
       groupName = await resolveInviteGroupName(inviteCode);
@@ -406,11 +487,19 @@ async function showMainMenu(reply) {
       "5 - Enviar sugestão",
       "",
       "Ou use comandos:",
-      "/add [termo] - adicionar filtro",
-      "/remover [termo] - remover filtro",
-      "/meusfiltros - ver seus filtros",
-      "/cupons - ver cupons recentes",
-      "/sugerir [texto] - enviar sugestão",
+      "c1 /menu - abrir menu",
+      "c2 /cadastro - ativar cadastro",
+      "c3 /add [termo] - adicionar filtro",
+      "c4 /remover [termo] - remover filtro",
+      "c5 /meusfiltros - ver filtros",
+      "c6 /cupons - ver cupons recentes",
+      "c11 /sugerirgrupo [link] - sugerir grupo",
+      "c12 /sugerir [texto] - enviar sugestao",
+      "",
+      "Atalhos por categoria:",
+      "cf1/cf2/cf3 - filtros",
+      "cc1..cc5 - cupons",
+      "cs1/cs2 - sugestoes",
     ].join("\n")
   );
 }
@@ -421,9 +510,9 @@ async function showFiltersMenu(reply) {
       "📋 *Menu de Filtros*",
       "",
       "Use os comandos:",
-      "/add [termo] - adicionar filtro",
-      "/remover [termo] - remover filtro",
-      "/meusfiltros - ver seus filtros",
+      "cf1 /add [termo] - adicionar filtro",
+      "cf2 /remover [termo] - remover filtro",
+      "cf3 /meusfiltros - ver seus filtros",
       "",
       "Digite 'menu' para voltar",
     ].join("\n")
@@ -436,11 +525,11 @@ async function showCouponsMenu(reply) {
       "🎫 *Menu de Cupons*",
       "",
       "Use os comandos:",
-      "/cupons - cupons recentes",
-      "/cupom [loja] - buscar por loja",
-      "/seguircupom [loja] - seguir loja",
-      "/pararcupom [loja] - parar de seguir",
-      "/meuscupons - lojas que você segue",
+      "cc1 /cupons - cupons recentes",
+      "cc2 /cupom [loja] - buscar por loja",
+      "cc3 /seguircupom [loja] - seguir loja",
+      "cc4 /pararcupom [loja] - parar de seguir",
+      "cc5 /meuscupons - lojas que voce segue",
       "",
       "Digite 'menu' para voltar",
     ].join("\n")

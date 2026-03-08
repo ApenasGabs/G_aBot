@@ -4,7 +4,9 @@ import { initWhatsappBot } from "./src/bot/whatsapp.js";
 import { BACKUP_CONFIG, BOT_CONFIG, PATHS } from "./src/config.js";
 import { createRepo } from "./src/db/repo.js";
 import { setupDatabase } from "./src/db/schema.js";
+import { getAIConfig, isAIEnabled } from "./src/services/aiCouponParser.js";
 import { startBackupScheduler } from "./src/services/backupService.js";
+import { ensureOllamaOnline, getOllamaInstanceStatus } from "./src/services/ollamaManager.js";
 
 let wppClient = null;
 
@@ -51,6 +53,27 @@ async function main() {
     intervalMs: BACKUP_CONFIG.intervalMs,
     maxFiles: BACKUP_CONFIG.maxFiles,
   });
+
+  if (isAIEnabled()) {
+    const aiConfig = getAIConfig();
+    console.log(`[AI Startup] Parser IA habilitado. Base URL: ${aiConfig.baseUrl}`);
+
+    if (BOT_CONFIG.ollamaAutoStart) {
+      const ensured = await ensureOllamaOnline(BOT_CONFIG.ollamaDefaultInstance);
+      if (ensured.ok) {
+        console.log(`[AI Startup] ${ensured.message} (${ensured.instanceName})`);
+      } else {
+        console.log(`[AI Startup] Falha ao iniciar instancia ${ensured.instanceName}: ${ensured.message}`);
+      }
+    } else {
+      const status = await getOllamaInstanceStatus(BOT_CONFIG.ollamaDefaultInstance);
+      if (status.online) {
+        console.log(`[AI Startup] Instancia ${status.instanceName} online com ${status.modelCount || 0} modelo(s).`);
+      } else {
+        console.log(`[AI Startup] Instancia ${status.instanceName} offline e OLLAMA_AUTO_START=false.`);
+      }
+    }
+  }
 
   wppClient = await initWhatsappBot({
     repo,

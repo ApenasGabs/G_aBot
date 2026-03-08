@@ -59,6 +59,13 @@ IMPORTANTE:
 - Normalize o nome da loja para nomes conhecidos do Brasil
 - Considere contexto do grupo/mensagem para identificar a loja
 
+TRATAMENTO DOS DADOS (obrigatório):
+1. Limpar ruído textual (emojis, quebras, pontuação excessiva) sem alterar o código do cupom.
+2. Identificar candidatos a cupom e escolher o mais provável.
+3. Detectar loja primeiro por menção explícita; se não houver, usar contexto do grupo.
+4. Classificar status do cupom (ativo/esgotado/expirado) com base no texto.
+5. Gerar resumo curto da decisão tomada no campo summary_with_ai.
+
 Formato de resposta EXATO:
 {
   "is_coupon": true/false,
@@ -66,8 +73,16 @@ Formato de resposta EXATO:
   "store_name": "Nome da Loja" ou null,
   "confidence": 0-100,
   "is_exhausted": true/false,
-  "reasoning": "Breve explicação da análise"
+  "reasoning": "Breve explicação da análise",
+  "summary_with_ai": "Resumo curto com contexto e interpretação"
 }`;
+
+function buildSummaryWithoutAI({ couponCode, storeName, isExhausted }) {
+  const code = couponCode || "nao identificado";
+  const store = storeName || "Loja nao identificada";
+  const status = isExhausted ? "esgotado/expirado" : "ativo";
+  return `Resumo sem IA: codigo=${code}, loja=${store}, status=${status}.`;
+}
 
 /**
  * Chama a API Ollama para análise de cupom
@@ -173,7 +188,9 @@ async function callOllamaAPI(messageText, groupName = '') {
  *   store_name: string|null,
  *   confidence: number (0-100),
  *   is_exhausted: boolean,
- *   reasoning: string
+ *   reasoning: string,
+ *   summary_with_ai: string,
+ *   summary_without_ai: string
  * }
  */
 export async function parseWithAI(messageText, groupName = '') {
@@ -201,6 +218,17 @@ export async function parseWithAI(messageText, groupName = '') {
   } else {
     result.confidence = 50; // Default se não vier
   }
+
+  result.summary_with_ai =
+    typeof result.summary_with_ai === 'string' && result.summary_with_ai.trim().length > 0
+      ? result.summary_with_ai.trim()
+      : (result.reasoning || "Resumo com IA indisponivel");
+
+  result.summary_without_ai = buildSummaryWithoutAI({
+    couponCode: result.coupon_code,
+    storeName: result.store_name,
+    isExhausted: !!result.is_exhausted,
+  });
 
   return result;
 }

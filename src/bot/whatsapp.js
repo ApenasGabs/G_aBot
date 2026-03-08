@@ -192,7 +192,7 @@ export async function initWhatsappBot({
                   "",
                   `Sugestao: ${suggestionText}`,
                   "",
-                  "Use: /adm aprovar s" + suggestionId + " ou /adm rejeitar s" + suggestionId,
+                  "Use: adm5 s" + suggestionId + " ou adm6 s" + suggestionId,
                 ].join("\n");
               } else {
                 message = [
@@ -203,7 +203,7 @@ export async function initWhatsappBot({
                   `Nome do grupo: ${groupName || "Nao identificado"}`,
                   `Link: ${groupLink}`,
                   "",
-                  "Use: /adm aprovar g" + suggestionId + " ou /adm rejeitar g" + suggestionId,
+                  "Use: adm5 g" + suggestionId + " ou adm6 g" + suggestionId,
                 ].join("\n");
               }
 
@@ -257,7 +257,12 @@ export async function initWhatsappBot({
             console.log(`[ADMIN DEBUG] Chat ID atual: ${chatId}`);
             console.log(`[ADMIN DEBUG] IDs são iguais: ${chatId === BOT_CONFIG.adminGroupId}`);
             
-            if (textLower.startsWith("/adm") || textLower.startsWith("/admin")) {
+            const isAdminCommand =
+              textLower.startsWith("/adm") ||
+              textLower.startsWith("/admin") ||
+              /^adm[0-9a-z]/.test(textLower);
+
+            if (isAdminCommand) {
               console.log(`[ADMIN DEBUG] Comando admin detectado: "${textLower}"`);
               const { handleAdminCommand } = await import("./adminCommands.js");
               await handleAdminCommand({
@@ -279,10 +284,23 @@ export async function initWhatsappBot({
 
           // Extrair cupons da mensagem (com suporte a IA)
           const extractionResult = await extractCoupons(text, groupName);
-          const { coupons, isExhausted, source, aiStore } = extractionResult;
+          const {
+            coupons,
+            isExhausted,
+            source,
+            aiStore,
+            summaryWithAI,
+            summaryWithoutAI,
+          } = extractionResult;
           
           if (coupons.length > 0) {
             console.log(`[Cupom] Método de extração: ${source}${aiStore ? ` | Loja (IA): ${aiStore}` : ''}`);
+            if (summaryWithAI) {
+              console.log(`[Cupom] ${summaryWithAI}`);
+            }
+            if (summaryWithoutAI) {
+              console.log(`[Cupom] ${summaryWithoutAI}`);
+            }
             
             const allCouponInterests = repo.listAllCouponInterests();
             const contextNormalized = normalizeText(`${groupName} ${text}`);
