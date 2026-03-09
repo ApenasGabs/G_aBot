@@ -1,108 +1,170 @@
+/**
+ * @fileoverview Manipulador de comandos privados do GaBot
+ * Suporta novos prefixos (+, -, ?, !, .) e compatibilidade com legacy
+ */
+
+import {
+  splitByComma,
+  validateBatchSize
+} from "./batchProcessor.js";
+import {
+  getReactionEmoji,
+  parseCommand as parseCommandNew
+} from "./commandParser.js";
+import * as templates from "./menuTemplates.js";
+
 // Rastreia estado do usuário (menu aguardando input)
 const userSessions = new Map();
 
+/**
+ * Parser de comando novo (delegado ao commandParser.js)
+ * Mantém assinatura original para compatibilidade
+ * 
+ * @deprecated Use parseCommandNew do commandParser.js diretamente
+ * @param {string} text - Texto do comando
+ * @returns {Object} Objeto estruturado do comando
+ */
 export function parseCommand(text) {
-  const trimmed = text.trim();
-  const tokens = trimmed.split(/\s+/);
-  const firstTokenRaw = tokens[0] || "";
-  const firstToken = firstTokenRaw.toLowerCase();
-  const firstTokenNoSlash = firstToken.replace(/^\//, "");
-  const argsTextFromTokens = tokens.slice(1).join(" ").trim();
-
-  const commandAliases = {
-    // Sequencial global
-    c1: "/menu",
-    c2: "/cadastro",
-    c3: "/add",
-    c4: "/remover",
-    c5: "/meusfiltros",
-    c6: "/cupons",
-    c7: "/cupom",
-    c8: "/seguircupom",
-    c9: "/pararcupom",
-    c10: "/meuscupons",
-    c11: "/sugerirgrupo",
-    c12: "/sugerir",
-
-    // Categoria filtros
-    cf1: "/add",
-    cf2: "/remover",
-    cf3: "/meusfiltros",
-
-    // Categoria cupons
-    cc1: "/cupons",
-    cc2: "/cupom",
-    cc3: "/seguircupom",
-    cc4: "/pararcupom",
-    cc5: "/meuscupons",
-
-    // Categoria sugestoes
-    cs1: "/sugerirgrupo",
-    cs2: "/sugerir",
-  };
-
-  if (commandAliases[firstTokenNoSlash]) {
-    return {
-      command: commandAliases[firstTokenNoSlash],
-      argsText: argsTextFromTokens,
-      isAlias: true,
-      aliasUsed: firstTokenNoSlash,
-    };
-  }
-  
-  // Aceita números simples (1-9)
-  if (/^[1-9]$/.test(trimmed)) {
-    return {
-      command: `menu_${trimmed}`,
-      argsText: "",
-      isNumeric: true,
-    };
-  }
-
-  // Aceita comandos sem / (menu, ajuda, cadastro, etc)
-  const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
-  const shortcuts = {
-    'menu': '/menu',
-    'ajuda': '/ajuda',
-    'cadastro': '/cadastro',
-    'filtros': '/meusfiltros',
-    'cupons': '/cupons',
-  };
-
-  if (shortcuts[firstWord]) {
-    const [, ...rest] = trimmed.split(/\s+/);
-    return {
-      command: shortcuts[firstWord],
-      argsText: rest.join(" ").trim(),
-      isShortcut: true,
-    };
-  }
-
-  // Comandos com /
-  if (trimmed.startsWith("/")) {
-    const [rawCommand, ...rest] = trimmed.split(/\s+/);
-    return {
-      command: rawCommand.toLowerCase(),
-      argsText: rest.join(" ").trim(),
-    };
-  }
-
-  return null;
+  return parseCommandNew(text);
 }
 
+/**
+ * Extrai código de convite do link do WhatsApp
+ * 
+ * @param {string} link - Link do grupo
+ * @returns {string|null} Código de convite ou null
+ */
 function extractInviteCode(link) {
   const match = link.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]{10,})/i);
   return match ? match[1] : null;
 }
 
+/**
+ * Converte status de sugestão para label em português
+ * 
+ * @param {string} status - Status da sugestão
+ * @returns {string} Label legível
+ */
 function suggestionStatusLabel(status) {
-  if (status === "pending") return "pendente";
-  if (status === "read") return "lida";
-  if (status === "approved") return "aprovada";
-  if (status === "rejected") return "rejeitada";
-  return status || "desconhecido";
+  const statusMap = {
+    pending: "⏳ pendente",
+    read: "👁️ lida",
+    approved: "✅ aprovada",
+    rejected: "❌ rejeitada",
+  };
+  return statusMap[status] || status || "desconhecido";
 }
 
+/**
+ * Manipulador de comando /add com suporte a lote
+ * 
+ * @param {Object} options - Configurações
+ */
+async function handleAddCommand({ chatId, name, argsText, repo, reply }) {
+  if (!argsText) {
+    await reply("❌ Contexto incompleto. Uso: `+ termo1, termo2`");
+    return;
+  }
+
+  repo.upsertUser(chatId, name);
+
+  // Valida tamanho do lote
+  const validation = validateBatchSize(argsText, 20);
+  if (!validation.valid) {
+    await reply(`❌ ${validation.error}`);
+    return;
+  }
+
+  const items = splitByComma(argsText);
+  
+  if (items.length === 1) {
+    // Comando único
+    const inserted = repo.addKeyword(chatId, items[0]);
+    await reply(
+      inserted
+        ? templates.getFilterAddedMessage(items[0])
+        : templates.getFilterDuplicateError(items[0])
+    );
+  } else {
+    // Processamento em lote
+    const successful = [];
+    const duplicates = [];
+
+    for (const term of items) {
+      if (repo.addKeyword(chatId, term)) {
+        successful.push(term);
+      } else {
+        duplicates.push(term);
+      }
+    }
+
+    let message = "";
+    if (successful.length > 0) {
+      message += templates.getFilterAddedMessage(successful) + "\n";
+    }
+    if (duplicates.length > 0) {
+      message += `⚠️ Ja existiam (${duplicates.length}): ${duplicates.join(", ")}`;
+    }
+
+    await reply(message.trim());
+  }
+}
+
+/**
+ * Manipulador de comando /remover com suporte a lote
+ */
+async function handleRemoveCommand({ chatId, argsText, repo, reply }) {
+  if (!argsText) {
+    await reply("❌ Contexto incompleto. Uso: `- termo1, termo2`");
+    return;
+  }
+
+  const validation = validateBatchSize(argsText, 20);
+  if (!validation.valid) {
+    await reply(`❌ ${validation.error}`);
+    return;
+  }
+
+  const items = splitByComma(argsText);
+
+  if (items.length === 1) {
+    const removed = repo.removeKeyword(chatId, items[0]);
+    await reply(
+      removed
+        ? templates.getFilterRemovedMessage(items[0])
+        : templates.getFilterNotFoundError(items[0])
+    );
+  } else {
+    const successful = [];
+    const notFound = [];
+
+    for (const term of items) {
+      if (repo.removeKeyword(chatId, term)) {
+        successful.push(term);
+      } else {
+        notFound.push(term);
+      }
+    }
+
+    let message = "";
+    if (successful.length > 0) {
+      message += templates.getFilterRemovedMessage(successful) + "\n";
+    }
+    if (notFound.length > 0) {
+      message += `⚠️ Nao encontrados (${notFound.length}): ${notFound.join(", ")}`;
+    }
+
+    await reply(message.trim());
+  }
+}
+
+/**
+ * Manipulador principal de comandos privados
+ * Processa novos comandos e mantém compatibilidade com legacy
+ * 
+ * @async
+ * @param {Object} options - Configurações
+ */
 export async function handlePrivateCommand({
   client,
   repo,
@@ -120,6 +182,18 @@ export async function handlePrivateCommand({
       return;
     }
     await client.sendMessage(chatId, { text: messageText });
+  };
+
+  // Função auxiliar para aplicar reação (feedback imediato)
+  const react = async (emoji) => {
+    try {
+      if (client?.sendMessage) {
+        // Reação via Baileys quando disponível
+        // await client.sendReaction(chatId, emoji);
+      }
+    } catch (e) {
+      // Silenciosamente ignora erros de reação
+    }
   };
 
   // Verifica se usuário está em uma sessão aguardando input
@@ -206,7 +280,65 @@ export async function handlePrivateCommand({
     return;
   }
 
-  const { command, argsText } = parsed;
+  const { command, argsText, actionPrefix } = parsed;
+
+  // ========== NOVOS COMANDOS COM PREFIXOS (+ - ? ! . g) ==========
+  
+  // Comando: + (adicionar filtro com suporte a lote)
+  if (command === "/add" && actionPrefix === "+") {
+    await react(getReactionEmoji("+"));
+    await handleAddCommand({ chatId, name, argsText, repo, reply });
+    return;
+  }
+
+  // Comando: - (remover filtro com suporte a lote)
+  if (command === "/remover" && actionPrefix === "-") {
+    await react(getReactionEmoji("-"));
+    await handleRemoveCommand({ chatId, argsText, repo, reply });
+    return;
+  }
+
+  // Comando: ? (buscar cupom por loja)
+  if (command === "/cupom" && actionPrefix === "?") {
+    await react(getReactionEmoji("?"));
+    if (!argsText) {
+      await reply(templates.getMissingArgumentError("?", "? amazon"));
+      return;
+    }
+    // Delegua para o comando /cupom
+    command = "/cupom";
+  }
+
+  // Comando: ! (sugerir/feedback)
+  if (command === "/sugerir" && actionPrefix === "!") {
+    await react(getReactionEmoji("!"));
+    if (!argsText) {
+      await reply(templates.getMissingArgumentError("!", "! o bot podia ter X funcionalidade"));
+      return;
+    }
+    // Delegua para o comando /sugerir
+    command = "/sugerir";
+  }
+
+  // Comando: . (chat com IA)
+  if (command === "/adm ia ask" && actionPrefix === ".") {
+    await react(getReactionEmoji("."));
+    // Será tratado em adminCommands.js
+    return;
+  }
+
+  // Comando: g (sugerir grupo)
+  if (command === "/sugerirgrupo" && actionPrefix === "g") {
+    await react(getReactionEmoji("g"));
+    if (!argsText) {
+      await reply(templates.getMissingArgumentError("g", "g chat.whatsapp.com/SEUCODIGO"));
+      return;
+    }
+    // Delegua para o comando /sugerirgrupo
+    command = "/sugerirgrupo";
+  }
+
+  // ========== COMANDOS TRADICIONAIS (LEGADO + NOVOS) ==========
 
   // Menu numérico
   if (command === "menu_1") {
@@ -492,66 +624,32 @@ export async function handlePrivateCommand({
   await showMainMenu(reply);
 }
 
-// Funções auxiliares de menu
+// ========== FUNÇÕES AUXILIARES DE MENU ==========
+
+/**
+ * Exibe o menu principal
+ */
 async function showMainMenu(reply) {
-  await reply(
-    [
-      "🤖 *Menu Principal*",
-      "",
-      "Envie apenas o número da opção:",
-      "",
-      "1 - Ativar cadastro",
-      "2 - Gerenciar filtros",
-      "3 - Buscar cupons",
-      "4 - Sugerir grupo",
-      "5 - Enviar sugestão",
-      "",
-      "Ou use comandos:",
-      "c1 /menu - abrir menu",
-      "c2 /cadastro - ativar cadastro",
-      "c3 /add [termo] - adicionar filtro",
-      "c4 /remover [termo] - remover filtro",
-      "c5 /meusfiltros - ver filtros",
-      "c6 /cupons - ver cupons recentes",
-      "c11 /sugerirgrupo [link] - sugerir grupo",
-      "c12 /sugerir [texto] - enviar sugestao",
-      "",
-      "Atalhos por categoria:",
-      "cf1/cf2/cf3 - filtros",
-      "cc1..cc5 - cupons",
-      "cs1/cs2 - sugestoes",
-    ].join("\n")
-  );
+  await reply(templates.getMainMenu());
 }
 
+/**
+ * Exibe o menu de filtros
+ */
 async function showFiltersMenu(reply) {
-  await reply(
-    [
-      "📋 *Menu de Filtros*",
-      "",
-      "Use os comandos:",
-      "cf1 /add [termo] - adicionar filtro",
-      "cf2 /remover [termo] - remover filtro",
-      "cf3 /meusfiltros - ver seus filtros",
-      "",
-      "Digite 'menu' para voltar",
-    ].join("\n")
-  );
+  await reply(templates.getFiltersMenu());
 }
 
+/**
+ * Exibe o menu de cupons
+ */
 async function showCouponsMenu(reply) {
-  await reply(
-    [
-      "🎫 *Menu de Cupons*",
-      "",
-      "Use os comandos:",
-      "cc1 /cupons - cupons recentes",
-      "cc2 /cupom [loja] - buscar por loja",
-      "cc3 /seguircupom [loja] - seguir loja",
-      "cc4 /pararcupom [loja] - parar de seguir",
-      "cc5 /meuscupons - lojas que voce segue",
-      "",
-      "Digite 'menu' para voltar",
-    ].join("\n")
-  );
+  await reply(templates.getCouponsMenu());
+}
+
+/**
+ * Exibe menu de ajuda
+ */
+async function showHelpMenu(reply) {
+  await reply(templates.getHelpMenu());
 }

@@ -1,3 +1,8 @@
+/**
+ * @fileoverview Manipulador de comandos administrativos do GaBot
+ * Suporta novos comandos simplificados: ok, no, stats, ia
+ */
+
 import {
   askOllamaInstance,
   controlOllamaInstance,
@@ -5,7 +10,24 @@ import {
   listConfiguredInstanceNames,
   listOllamaInstancesStatus,
 } from "../services/ollamaManager.js";
+import {
+  hasWildcard,
+  splitByComma
+} from "./batchProcessor.js";
+import {
+  getArguments,
+  getFirstToken,
+  normalizeText
+} from "./commandParser.js";
+import * as templates from "./menuTemplates.js";
 
+/**
+ * Manipulador principal de comandos admin
+ * Suporta novos atalhos: ok, no, stats, ia
+ * Mantém compatibilidade com /adm [comando]
+ * 
+ * @async
+ */
 export async function handleAdminCommand({ client, repo, chatId, text }) {
   console.log(`[ADMIN CMD] Recebeu comando: "${text}"`);
   
@@ -16,11 +38,126 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
   };
 
   const rawTrimmed = text.trim();
-  const trimmed = rawTrimmed.toLowerCase();
+  const trimmed = normalizeText(rawTrimmed);
+  const firstToken = getFirstToken(trimmed);
+  const argsText = getArguments(trimmed);
+
+  // ========== NOVOS COMANDOS SIMPLIFICADOS ==========
+  
+  // Comando: ok [id] - Aprovar sugestão
+  if (firstToken === "ok") {
+    if (!argsText) {
+      await reply("❌ Uso: ok [id]\nExemplo: ok g1 ou ok g1,g2 ou ok g*");
+      return;
+    }
+
+    // Suporta wildcards: ok g*
+    if (hasWildcard(argsText)) {
+      const prefix = argsText.replace("*", "");
+      await handleApproveWildcard(reply, repo, client, prefix);
+      return;
+    }
+
+    // Suporta lote: ok g1,g2,g3
+    if (argsText.includes(",")) {
+      const ids = splitByComma(argsText);
+      await handleApproveBatch(reply, repo, client, ids);
+      return;
+    }
+
+    // Aprovação única
+    const match = argsText.match(/^([gs])(\d+)$/);
+    if (match) {
+      const [, type, id] = match;
+      await updateSuggestionStatus(
+        reply,
+        repo,
+        client,
+        type,
+        id,
+        "approved"
+      );
+      return;
+    }
+
+    await reply("❌ Formato inválido. Use: ok g1 ou ok g1,g2 ou ok g*");
+    return;
+  }
+
+  // Comando: no [id] - Rejeitar sugestão
+  if (firstToken === "no") {
+    if (!argsText) {
+      await reply("❌ Uso: no [id]\nExemplo: no s1 ou no s1,s2 ou no s*");
+      return;
+    }
+
+    if (hasWildcard(argsText)) {
+      const prefix = argsText.replace("*", "");
+      await handleRejectWildcard(reply, repo, client, prefix);
+      return;
+    }
+
+    if (argsText.includes(",")) {
+      const ids = splitByComma(argsText);
+      await handleRejectBatch(reply, repo, client, ids);
+      return;
+    }
+
+    const match = argsText.match(/^([gs])(\d+)$/);
+    if (match) {
+      const [, type, id] = match;
+      await updateSuggestionStatus(
+        reply,
+        repo,
+        client,
+        type,
+        id,
+        "rejected"
+      );
+      return;
+    }
+
+    await reply("❌ Formato inválido. Use: no s1 ou no s1,s2 ou no s*");
+    return;
+  }
+
+  // Comando: stats - Status do bot
+  if (firstToken === "stats") {
+    await showBotStatus(reply);
+    return;
+  }
+
+  // Comando: ia - Gerenciar Ollama
+  if (firstToken === "ia") {
+    if (!argsText) {
+      await showOllamaMenu(reply);
+      return;
+    }
+
+    // ia reset [nome]
+    const resetMatch = argsText.match(/^reset\s+(\S+)$/);
+    if (resetMatch) {
+      const [, modelName] = resetMatch;
+      await handleOllamaControl(reply, "restart", modelName);
+      return;
+    }
+
+    // ia status [nome]
+    const statusMatch = argsText.match(/^status(?:\s+(\S+))?$/);
+    if (statusMatch) {
+      await handleOllamaStatus(reply, statusMatch[1]);
+      return;
+    }
+
+    await showOllamaMenu(reply);
+    return;
+  }
+
+  // ========== COMANDOS LEGACY (COMPATIBILIDADE) ==========
 
   const tokens = trimmed.split(/\s+/);
-  const firstTokenNoSlash = (tokens[0] || "").replace(/^\//, "");
-  const restArgs = tokens.slice(1).join(" ").trim();
+  const firstTokenNoSlash = firstToken.replace(/^\//, "");
+  const restArgs = argsText;
 
   let normalizedCommand = trimmed;
 
@@ -55,14 +192,21 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
   console.log(`[ADMIN CMD] Comando normalizado: "${normalizedCommand}"`);
 
   // Comando /adm ou /admin - mostra menu
-  if (normalizedCommand === "/adm" || normalizedCommand === "/admin") {
+  if (
+    normalizedCommand === "/adm" ||
+    normalizedCommand === "/admin" ||
+    firstToken === "adm"
+  ) {
     console.log(`[ADMIN CMD] Mostrando menu admin`);
     await showAdminMenu(reply);
     return;
   }
 
   // Comando /adm sugestoes - lista todas as sugestões pendentes
-  if (normalizedCommand === "/adm sugestoes" || normalizedCommand === "/adm sugestões") {
+  if (
+    normalizedCommand === "/adm sugestoes" ||
+    normalizedCommand === "/adm sugestões"
+  ) {
     console.log(`[ADMIN CMD] Listando todas sugestões`);
     await listAllSuggestions(reply, repo, client);
     return;
@@ -136,14 +280,14 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
   const approveMatch = normalizedCommand.match(/^\/adm\s+aprovar\s+([gs])\s*(\d+)$/);
   if (approveMatch) {
     const [, type, id] = approveMatch;
-    await updateSuggestionStatus(reply, repo, client, type, id, 'approved');
+    await updateSuggestionStatus(reply, repo, client, type, id, "approved");
     return;
   }
 
   const rejectMatch = normalizedCommand.match(/^\/adm\s+rejeitar\s+([gs])\s*(\d+)$/);
   if (rejectMatch) {
     const [, type, id] = rejectMatch;
-    await updateSuggestionStatus(reply, repo, client, type, id, 'rejected');
+    await updateSuggestionStatus(reply, repo, client, type, id, "rejected");
     return;
   }
 }
@@ -185,33 +329,7 @@ async function notifySuggestionStatusChange(client, suggestionType, suggestion, 
 }
 
 async function showAdminMenu(reply) {
-  await reply(
-    [
-      "👮 *Painel de Administração*",
-      "",
-      "Comandos disponíveis:",
-      "",
-      "adm1 /adm status - verificar status do bot",
-      "adm2 /adm sugestoes - listar todas sugestoes",
-      "adm3 /adm grupos - listar sugestoes de grupos",
-      "adm4 /adm gerais - listar sugestoes gerais",
-      "adm7 /adm lidas - listar sugestoes lidas",
-      "adm8 /adm ia - menu IA/Ollama",
-      "adm9 /adm ia status [instancia]",
-      "adm10 /adm ia start [instancia]",
-      "adm11 /adm ia stop [instancia]",
-      "adm12 /adm ia restart [instancia]",
-      "adm13 /adm ia instancias",
-      "adm14 /adm ia ask [instancia::]pergunta",
-      "",
-      "Gerenciar:",
-      "adm5 [tipo][id] /adm aprovar [tipo][id]",
-      "adm6 [tipo][id] /adm rejeitar [tipo][id]",
-      "",
-      "Tipos: g (grupo) ou s (sugestao)",
-      "Exemplo: adm5 g5",
-    ].join("\n")
-  );
+  await reply(templates.getAdminMenu());
 }
 
 async function showOllamaMenu(reply) {
@@ -533,6 +651,180 @@ async function showReadSuggestions(reply, repo) {
   }
 
   await reply(lines.join("\n"));
+}
+
+/**
+ * Manipula aprovação em lote (ex: ok g1,g2,g3)
+ */
+async function handleApproveBatch(reply, repo, client, ids) {
+  const successIds = [];
+  const failedIds = [];
+
+  for (const id of ids) {
+    const match = id.match(/^([gs])(\d+)$/);
+    if (!match) {
+      failedIds.push(id);
+      continue;
+    }
+
+    const [, type, numId] = match;
+    const numIdParsed = parseInt(numId, 10);
+    
+    let success = false;
+    let suggestion = null;
+    
+    if (type === 'g') {
+      suggestion = repo.getGroupSuggestionById(numIdParsed);
+      success = repo.updateGroupSuggestionStatus(numIdParsed, 'approved');
+    } else if (type === 's') {
+      suggestion = repo.getGeneralSuggestionById(numIdParsed);
+      success = repo.updateGeneralSuggestionStatus(numIdParsed, 'approved');
+    }
+
+    if (success) {
+      successIds.push(id);
+      if (suggestion) {
+        await notifySuggestionStatusChange(client, type, suggestion, 'approved');
+      }
+    } else {
+      failedIds.push(id);
+    }
+  }
+
+  let message = `✅ Aprovadas (${successIds.length}): ${successIds.join(", ")}\n`;
+  if (failedIds.length > 0) {
+    message += `❌ Falhas (${failedIds.length}): ${failedIds.join(", ")}`;
+  }
+
+  await reply(message.trim());
+}
+
+/**
+ * Manipula rejeição em lote (ex: no s1,s2,s3)
+ */
+async function handleRejectBatch(reply, repo, client, ids) {
+  const successIds = [];
+  const failedIds = [];
+
+  for (const id of ids) {
+    const match = id.match(/^([gs])(\d+)$/);
+    if (!match) {
+      failedIds.push(id);
+      continue;
+    }
+
+    const [, type, numId] = match;
+    const numIdParsed = parseInt(numId, 10);
+    
+    let success = false;
+    let suggestion = null;
+    
+    if (type === 'g') {
+      suggestion = repo.getGroupSuggestionById(numIdParsed);
+      success = repo.updateGroupSuggestionStatus(numIdParsed, 'rejected');
+    } else if (type === 's') {
+      suggestion = repo.getGeneralSuggestionById(numIdParsed);
+      success = repo.updateGeneralSuggestionStatus(numIdParsed, 'rejected');
+    }
+
+    if (success) {
+      successIds.push(id);
+      if (suggestion) {
+        await notifySuggestionStatusChange(client, type, suggestion, 'rejected');
+      }
+    } else {
+      failedIds.push(id);
+    }
+  }
+
+  let message = `✅ Rejeitadas (${successIds.length}): ${successIds.join(", ")}\n`;
+  if (failedIds.length > 0) {
+    message += `❌ Falhas (${failedIds.length}): ${failedIds.join(", ")}`;
+  }
+
+  await reply(message.trim());
+}
+
+/**
+ * Manipula aprovação com wildcard (ex: ok g* - aprova todos os grupos)
+ */
+async function handleApproveWildcard(reply, repo, client, prefix) {
+  try {
+    const suggestions = prefix === 'g'
+      ? repo.listGroupSuggestions()
+      : repo.listGeneralSuggestions();
+
+    const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
+    
+    if (pendingSuggestions.length === 0) {
+      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${prefix}'`);
+      return;
+    }
+
+    let approved = 0;
+    for (const suggestion of pendingSuggestions) {
+      const success =
+        prefix === 'g'
+          ? repo.updateGroupSuggestionStatus(suggestion.id, 'approved')
+          : repo.updateGeneralSuggestionStatus(suggestion.id, 'approved');
+
+      if (success) {
+        approved++;
+        await notifySuggestionStatusChange(
+          client,
+          prefix,
+          suggestion,
+          'approved'
+        );
+      }
+    }
+
+    await reply(`✅ ${approved}/${pendingSuggestions.length} sugestões aprovadas`);
+  } catch (error) {
+    console.error("[ADMIN] Erro ao aprovar wildcard:", error);
+    await reply("❌ Erro ao processar wildcards");
+  }
+}
+
+/**
+ * Manipula rejeição com wildcard (ex: no s* - rejeita todas as sugestões)
+ */
+async function handleRejectWildcard(reply, repo, client, prefix) {
+  try {
+    const suggestions = prefix === 'g'
+      ? repo.listGroupSuggestions()
+      : repo.listGeneralSuggestions();
+
+    const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
+    
+    if (pendingSuggestions.length === 0) {
+      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${prefix}'`);
+      return;
+    }
+
+    let rejected = 0;
+    for (const suggestion of pendingSuggestions) {
+      const success =
+        prefix === 'g'
+          ? repo.updateGroupSuggestionStatus(suggestion.id, 'rejected')
+          : repo.updateGeneralSuggestionStatus(suggestion.id, 'rejected');
+
+      if (success) {
+        rejected++;
+        await notifySuggestionStatusChange(
+          client,
+          prefix,
+          suggestion,
+          'rejected'
+        );
+      }
+    }
+
+    await reply(`✅ ${rejected}/${pendingSuggestions.length} sugestões rejeitadas`);
+  } catch (error) {
+    console.error("[ADMIN] Erro ao rejeitar wildcard:", error);
+    await reply("❌ Erro ao processar wildcards");
+  }
 }
 
 async function updateSuggestionStatus(reply, repo, client, type, id, status) {
