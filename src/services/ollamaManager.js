@@ -12,6 +12,11 @@ function getDefaultInstanceName() {
   return BOT_CONFIG.ollamaDefaultInstance || "local";
 }
 
+function getFallbackModels() {
+  const configured = BOT_CONFIG.ollamaFallbackModels || [];
+  return configured.filter(Boolean);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -244,6 +249,11 @@ export async function askOllamaInstance({
     process.env.COUPON_AI_MODEL ||
     "qwen2.5:1.5b";
 
+  const fallbackModels = [
+    selectedModel,
+    ...getFallbackModels().filter((m) => m !== selectedModel),
+  ];
+
   if (!prompt || !prompt.trim()) {
     return {
       ok: false,
@@ -262,16 +272,130 @@ export async function askOllamaInstance({
     // validação opcional de conectividade, segue para chamada principal
   }
 
+  const errors = [];
+
+  for (const currentModel of fallbackModels) {
+    const ensureResult = await ensureModelAvailable({
+      baseUrl,
+      modelName: currentModel,
+      enablePull: BOT_CONFIG.ollamaAutoPullModels,
+    });
+
+    if (!ensureResult.ok) {
+      errors.push(`[${currentModel}] ${ensureResult.error}`);
+      continue;
+    }
+
+    try {
+      const response = await fetch(`${baseUrl}/api/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: currentModel,
+          prompt: prompt.trim(),
+          system: system || undefined,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        errors.push(`[${currentModel}] HTTP ${response.status}: ${errorText}`);
+        continue;
+      }
+
+      const data = await response.json();
+      const answer = (data.response || "").trim();
+
+      if (!answer) {
+        errors.push(`[${currentModel}] resposta vazia do modelo`);
+        continue;
+      }
+
+      return {
+        ok: true,
+        instanceName,
+        model: currentModel,
+        answer,
+        promptEvalCount: data.prompt_eval_count || null,
+        evalCount: data.eval_count || null,
+      };
+    } catch (error) {
+      errors.push(`[${currentModel}] ${error.message}`);
+    }
+  }
+
+  return {
+    ok: false,
+    instanceName,
+    model: selectedModel,
+    error: errors.length > 0
+      ? `Nao foi possivel responder com nenhum modelo. Detalhes: ${errors.join(" | ")}`
+      : "Falha ao consultar modelo",
+  };
+}
+
+async function ensureModelAvailable({ baseUrl, modelName, enablePull }) {
+  const tagsStatus = await getModelsFromTags(baseUrl);
+  if (!tagsStatus.ok) {
+    return {
+      ok: false,
+      error: tagsStatus.error || "nao foi possivel consultar modelos",
+    };
+  }
+
+  if (tagsStatus.models.includes(modelName)) {
+    return { ok: true, pulled: false };
+  }
+
+  if (!enablePull) {
+    return {
+      ok: false,
+      error: `modelo '${modelName}' nao encontrado e auto-pull desabilitado`,
+    };
+  }
+
+  const pullResult = await pullModel(baseUrl, modelName);
+  if (!pullResult.ok) {
+    return {
+      ok: false,
+      error: pullResult.error || `falha ao fazer pull de '${modelName}'`,
+    };
+  }
+
+  return { ok: true, pulled: true };
+}
+
+async function getModelsFromTags(baseUrl) {
   try {
-    const response = await fetch(`${baseUrl}/api/generate`, {
+    const response = await fetchWithTimeout(`${baseUrl}/api/tags`, 8000);
+    if (!response.ok) {
+      return { ok: false, models: [], error: `HTTP ${response.status}` };
+    }
+
+    const payload = await response.json();
+    const models = Array.isArray(payload.models)
+      ? payload.models.map((m) => m.name).filter(Boolean)
+      : [];
+
+    return { ok: true, models };
+  } catch (error) {
+    return { ok: false, models: [], error: error.message };
+  }
+}
+
+async function pullModel(baseUrl, modelName) {
+  try {
+    console.log(`[Ollama] Modelo '${modelName}' ausente. Tentando pull automatico...`);
+    const response = await fetch(`${baseUrl}/api/pull`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: selectedModel,
-        prompt: prompt.trim(),
-        system: system || undefined,
+        name: modelName,
         stream: false,
       }),
     });
@@ -280,37 +404,14 @@ export async function askOllamaInstance({
       const errorText = await response.text();
       return {
         ok: false,
-        instanceName,
-        model: selectedModel,
         error: `HTTP ${response.status}: ${errorText}`,
       };
     }
 
-    const data = await response.json();
-    const answer = (data.response || "").trim();
-
-    if (!answer) {
-      return {
-        ok: false,
-        instanceName,
-        model: selectedModel,
-        error: "Resposta vazia do modelo",
-      };
-    }
-
-    return {
-      ok: true,
-      instanceName,
-      model: selectedModel,
-      answer,
-      promptEvalCount: data.prompt_eval_count || null,
-      evalCount: data.eval_count || null,
-    };
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,
-      instanceName,
-      model: selectedModel,
       error: error.message,
     };
   }

@@ -63,6 +63,11 @@ export const BOT_CONFIG = {
   browserIdentity: ["G_aBot", "Chrome", "1.0.0"],
   adminGroupId: process.env.BOT_ADMIN_GROUP_ID || "",
   ollamaAutoStart: process.env.OLLAMA_AUTO_START !== "false",
+  ollamaAutoPullModels: process.env.OLLAMA_AUTO_PULL_MODELS !== "false",
+  ollamaFallbackModels: (process.env.OLLAMA_FALLBACK_MODELS || "qwen2.5:1.5b,llama3.2:1b,gemma2:2b")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean),
   ollamaDefaultInstance: process.env.OLLAMA_DEFAULT_INSTANCE || "local",
   ollamaInstances: buildOllamaInstances(),
 };
