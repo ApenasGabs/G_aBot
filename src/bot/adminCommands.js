@@ -5,7 +5,11 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { PATHS } from "../config.js";
+import { BOT_CONFIG, PATHS } from "../config.js";
+import {
+  parseAdminTerminalAction,
+  runTerminalCommand,
+} from "../services/adminTerminalControl.js";
 import {
   askOllamaInstance,
   controlOllamaInstance,
@@ -127,7 +131,13 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
 
   // Comando: stats - Status do bot
   if (firstToken === "stats") {
-    await showBotStatus(reply);
+    await showBotStatus(reply, repo);
+    return;
+  }
+
+  // Comando: sys - controle seguro de terminal
+  if (firstToken === "sys" || firstToken === "terminal") {
+    await handleTerminalControl(reply, argsText);
     return;
   }
 
@@ -247,7 +257,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   // Comando /adm status - mostra status do bot
   if (normalizedCommand === "/adm status" || normalizedCommand === "/adm health") {
     console.log(`[ADMIN CMD] Mostrando status do bot`);
-    await showBotStatus(reply);
+    await showBotStatus(reply, repo);
     return;
   }
 
@@ -263,6 +273,12 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
 
   if (normalizedCommand === "/adm ia") {
     await showOllamaMenu(reply);
+    return;
+  }
+
+  const sysMatch = normalizedCommand.match(/^\/adm\s+(?:sys|terminal)\s*(.*)$/);
+  if (sysMatch) {
+    await handleTerminalControl(reply, (sysMatch[1] || "").trim());
     return;
   }
 
@@ -375,6 +391,50 @@ const showOllamaMenu = async (reply) => {
       ". local::extraia cupom e loja desta mensagem: ...",
     ].join("\n")
   );
+};
+
+const handleTerminalControl = async (reply, argsText) => {
+  const parsed = parseAdminTerminalAction(argsText, BOT_CONFIG.allowSystemReboot);
+
+  if (!parsed.ok) {
+    if (parsed.usage) {
+      await reply(parsed.usage);
+      return;
+    }
+
+    await reply(`❌ ${parsed.error}`);
+    return;
+  }
+
+  await reply(`Executando: ${parsed.summary}...`);
+
+  const result = await runTerminalCommand({
+    command: parsed.command,
+    args: parsed.args,
+    cwd: PATHS.root,
+    timeoutMs: parsed.timeoutMs,
+  });
+
+  const commandLine = `${parsed.command} ${parsed.args.join(" ")}`.trim();
+  const statusLabel = result.ok ? "✅ Concluido" : "❌ Falhou";
+  const lines = [
+    `${statusLabel}: ${parsed.summary}`,
+    `Comando: ${commandLine}`,
+  ];
+
+  if (result.timedOut) {
+    lines.push("Tempo limite atingido.");
+  }
+
+  if (result.stdout && result.stdout !== "(sem saida)") {
+    lines.push("", "Saida:", result.stdout);
+  }
+
+  if (!result.ok && result.stderr && result.stderr !== "(sem saida)") {
+    lines.push("", "Erro:", result.stderr);
+  }
+
+  await reply(lines.join("\n"));
 };
 
 const extractAskArgs = (rawText) => {
@@ -523,7 +583,7 @@ const formatOllamaStatus = (status) => {
   return lines.join("\n");
 };
 
-const showBotStatus = async (reply) => {
+const showBotStatus = async (reply, repo) => {
   const uptime = process.uptime();
   const uptimeMinutes = Math.floor(uptime / 60);
   const uptimeSeconds = Math.floor(uptime % 60);
@@ -534,6 +594,29 @@ const showBotStatus = async (reply) => {
     timeZone: 'America/Sao_Paulo' 
   });
 
+  const metrics = repo?.listCouponStoreMetrics
+    ? repo.listCouponStoreMetrics(5)
+    : [];
+
+  const metricsLines = [];
+  if (metrics.length > 0) {
+    metricsLines.push("", "Top lojas (telemetria de cupom):");
+    for (const row of metrics) {
+      const detected = Number(row.detected_count || 0);
+      const matched = Number(row.matched_count || 0);
+      const falsePositive = Number(row.false_positive_count || 0);
+      const matchRate = detected > 0 ? Math.round((matched / detected) * 100) : 0;
+      const falsePositiveRate =
+        detected + falsePositive > 0
+          ? Math.round((falsePositive / (detected + falsePositive)) * 100)
+          : 0;
+
+      metricsLines.push(
+        `- ${row.store_name}: match ${matchRate}% (${matched}/${detected}) | falso+ ${falsePositiveRate}% (${falsePositive})`
+      );
+    }
+  }
+
   await reply(
     [
       "✅ *Status do Bot*",
@@ -543,6 +626,7 @@ const showBotStatus = async (reply) => {
       `Memória: ${memoryMB} MB`,
       `Versão: gabot-ofertas v0.0.1`,
       `Node.js: ${process.version}`,
+      ...metricsLines,
       "",
       "Bot operacional 🟢",
     ].join("\n")

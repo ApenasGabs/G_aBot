@@ -94,6 +94,8 @@ export function getAdminMenu() {
 📊 *SISTEMA*
 • \`stats\` : Status e Versão
 • \`logs\` : Ver últimos erros
+• \`sys help\` : Comandos de terminal
+• \`sys bot restart\` : Reiniciar bot via PM2
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 }

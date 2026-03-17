@@ -271,6 +271,10 @@ export async function initWhatsappBot({
               textLower === "stats" ||
               textLower === "ia" ||
               textLower.startsWith("ia ") ||
+              textLower === "sys" ||
+              textLower.startsWith("sys ") ||
+              textLower === "terminal" ||
+              textLower.startsWith("terminal ") ||
               textLower === "logs" ||
               textLower.startsWith(".");
 
