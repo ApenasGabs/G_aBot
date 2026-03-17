@@ -1,6 +1,11 @@
 import { normalizeText } from "../utils/text.js";
 
 export function createRepo(db) {
+  const normalizeAlertMode = (mode) => {
+    const normalized = String(mode || "").trim().toLowerCase();
+    return normalized === "compact" ? "compact" : "full";
+  };
+
   const upsertUserStmt = db.prepare(`
     INSERT INTO users (chat_id, name, is_active)
     VALUES (?, ?, 1)
@@ -14,6 +19,19 @@ export function createRepo(db) {
     FROM users
     WHERE chat_id = ?
     LIMIT 1
+  `);
+
+  const getUserAlertModeStmt = db.prepare(`
+    SELECT alert_mode
+    FROM users
+    WHERE chat_id = ?
+    LIMIT 1
+  `);
+
+  const updateUserAlertModeStmt = db.prepare(`
+    UPDATE users
+    SET alert_mode = ?
+    WHERE chat_id = ?
   `);
 
   const addKeywordStmt = db.prepare(`
@@ -277,6 +295,13 @@ export function createRepo(db) {
     LIMIT 1
   `);
 
+  const findCouponByCodeStmt = db.prepare(`
+    SELECT id
+    FROM coupons
+    WHERE code_normalized = ?
+    LIMIT 1
+  `);
+
   const listRecentCouponsStmt = db.prepare(`
     SELECT
       code,
@@ -325,10 +350,81 @@ export function createRepo(db) {
   `);
 
   const listAllCouponInterestsStmt = db.prepare(`
-    SELECT ci.user_id, ci.store_name, ci.store_normalized
+    SELECT ci.user_id, ci.store_name, ci.store_normalized, COALESCE(u.alert_mode, 'full') as alert_mode
     FROM coupon_interests ci
     INNER JOIN users u ON u.chat_id = ci.user_id
     WHERE u.is_active = 1
+  `);
+
+  const upsertCouponStoreMetricStmt = db.prepare(`
+    INSERT INTO coupon_store_metrics (
+      store_normalized,
+      store_name,
+      detected_count,
+      matched_count,
+      false_positive_count,
+      updated_at
+    )
+    VALUES (?, ?, 0, 0, 0, CURRENT_TIMESTAMP)
+    ON CONFLICT(store_normalized) DO UPDATE SET
+      store_name = excluded.store_name,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  const incrementDetectedMetricStmt = db.prepare(`
+    UPDATE coupon_store_metrics
+    SET detected_count = detected_count + ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE store_normalized = ?
+  `);
+
+  const incrementMatchedMetricStmt = db.prepare(`
+    UPDATE coupon_store_metrics
+    SET matched_count = matched_count + ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE store_normalized = ?
+  `);
+
+  const incrementFalsePositiveMetricStmt = db.prepare(`
+    UPDATE coupon_store_metrics
+    SET false_positive_count = false_positive_count + ?,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE store_normalized = ?
+  `);
+
+  const incrementCouponStoreMetricTx = db.transaction((storeName, eventType, amount = 1) => {
+    const safeStoreName = String(storeName || "Loja nao identificada").trim() || "Loja nao identificada";
+    const storeNormalized = normalizeText(safeStoreName) || "loja nao identificada";
+    const safeAmount = Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1;
+
+    upsertCouponStoreMetricStmt.run(storeNormalized, safeStoreName);
+
+    if (eventType === "detected") {
+      incrementDetectedMetricStmt.run(safeAmount, storeNormalized);
+      return;
+    }
+
+    if (eventType === "matched") {
+      incrementMatchedMetricStmt.run(safeAmount, storeNormalized);
+      return;
+    }
+
+    if (eventType === "false_positive") {
+      incrementFalsePositiveMetricStmt.run(safeAmount, storeNormalized);
+    }
+  });
+
+  const listCouponStoreMetricsStmt = db.prepare(`
+    SELECT
+      store_name,
+      store_normalized,
+      detected_count,
+      matched_count,
+      false_positive_count,
+      strftime('%s', updated_at) * 1000 as updated_at_timestamp
+    FROM coupon_store_metrics
+    ORDER BY detected_count DESC, matched_count DESC
+    LIMIT ?
   `);
 
   return {
@@ -336,6 +432,18 @@ export function createRepo(db) {
       const existing = findUserByChatIdStmt.get(chatId);
       upsertUserStmt.run(chatId, name || null);
       return { isNew: !existing };
+    },
+    getUserAlertMode(chatId) {
+      const row = getUserAlertModeStmt.get(chatId);
+      return normalizeAlertMode(row?.alert_mode);
+    },
+    setUserAlertMode(chatId, mode) {
+      const normalizedMode = normalizeAlertMode(mode);
+      const result = updateUserAlertModeStmt.run(normalizedMode, chatId);
+      return {
+        updated: result.changes > 0,
+        mode: normalizedMode,
+      };
     },
     addKeyword(chatId, term) {
       const normalized = normalizeText(term);
@@ -415,6 +523,7 @@ export function createRepo(db) {
     upsertCoupon({ code, groupId, groupName, messageText, isExhausted }) {
       const normalized = normalizeText(code);
       const existing = findCouponByKeyStmt.get(normalized, groupId);
+      const existingGlobal = findCouponByCodeStmt.get(normalized);
       upsertCouponStmt.run(
         code,
         normalized,
@@ -423,7 +532,10 @@ export function createRepo(db) {
         messageText || null,
         isExhausted ? 1 : 0
       );
-      return { isNew: !existing };
+      return {
+        isNewGroup: !existing,
+        isNewGlobal: !existingGlobal,
+      };
     },
     listRecentCoupons(limit = 10) {
       return listRecentCouponsStmt.all(limit);
@@ -446,6 +558,12 @@ export function createRepo(db) {
     },
     listAllCouponInterests() {
       return listAllCouponInterestsStmt.all();
+    },
+    incrementCouponStoreMetric(storeName, eventType, amount = 1) {
+      incrementCouponStoreMetricTx(storeName, eventType, amount);
+    },
+    listCouponStoreMetrics(limit = 10) {
+      return listCouponStoreMetricsStmt.all(limit);
     },
   };
 }

@@ -116,6 +116,8 @@ G_aBot/
 | `seguir [loja]` | Receber alertas da loja |
 | `parar [loja]` | Parar de receber alertas |
 | `lojas` | Ver lojas que você segue |
+| `alerta compacto` | Receber alerta de cupom resumido |
+| `alerta detalhado` | Voltar ao alerta completo |
 | `help` | Ver guia completo |
 | `/menu` | Menu principal |
 

@@ -4,13 +4,13 @@
  */
 
 import {
-  processBatch,
-  splitByComma,
-  validateBatchSize
+    processBatch,
+    splitByComma,
+    validateBatchSize
 } from "./batchProcessor.js";
 import {
-  getReactionEmoji,
-  parseCommand as parseCommandNew
+    getReactionEmoji,
+    parseCommand as parseCommandNew
 } from "./commandParser.js";
 import * as templates from "./menuTemplates.js";
 
@@ -433,6 +433,48 @@ export const handlePrivateCommand = async ({
           ].join("\n")
         : "✅ Voce ja esta cadastrado! Use + termo para monitorar ofertas e seguir loja para cupons."
     );
+    return;
+  }
+
+  if (command === "/alerta") {
+    const normalizedArg = String(argsText || "").trim().toLowerCase();
+
+    if (!normalizedArg) {
+      const currentMode = repo.getUserAlertMode(chatId);
+      const currentLabel = currentMode === "compact" ? "compacto" : "detalhado";
+      await reply(
+        [
+          `Seu modo atual de alerta de cupom: ${currentLabel}.`,
+          "Use: alerta compacto  ou  alerta detalhado",
+        ].join("\n")
+      );
+      return;
+    }
+
+    const compactAliases = ["compact", "compacto", "resumido", "on", "ligar"];
+    const fullAliases = ["full", "detalhado", "normal", "off", "desligar"];
+
+    let targetMode = null;
+    if (compactAliases.includes(normalizedArg)) {
+      targetMode = "compact";
+    } else if (fullAliases.includes(normalizedArg)) {
+      targetMode = "full";
+    }
+
+    if (!targetMode) {
+      await reply("Uso correto: alerta compacto  |  alerta detalhado");
+      return;
+    }
+
+    repo.upsertUser(chatId, name);
+    const result = repo.setUserAlertMode(chatId, targetMode);
+    if (!result.updated) {
+      await reply("Nao consegui atualizar seu modo de alerta agora. Tente novamente.");
+      return;
+    }
+
+    const modeLabel = result.mode === "compact" ? "compacto" : "detalhado";
+    await reply(`✅ Modo de alerta atualizado para: ${modeLabel}.`);
     return;
   }
 

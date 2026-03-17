@@ -70,6 +70,10 @@ function scoreCoupon(code, baseScore) {
   return Math.max(0, Math.min(100, score));
 }
 
+function hasCouponIntent(text) {
+  return /(cupom|c[óo]digo|coupon)/i.test(text || "");
+}
+
 // Padrões que indicam cupom esgotado/expirado
 const EXHAUSTED_PATTERNS = [
   /cupom\s+(esgotado|expirado|encerrado|acabou)/i,
@@ -102,6 +106,11 @@ function extractCouponsRegex(text) {
       source: 'regex',
       summaryWithAI: null,
       summaryWithoutAI: "Resumo sem IA: cupom referenciado sem codigo explicito (pagina/anuncio).",
+      telemetry: {
+        hasCouponIntent: true,
+        isFalsePositive: true,
+        reason: "page_coupon_without_code",
+      },
     };
   }
 
@@ -139,6 +148,11 @@ function extractCouponsRegex(text) {
     source: 'regex',
     summaryWithAI: null,
     summaryWithoutAI,
+    telemetry: {
+      hasCouponIntent: hasCouponIntent(text),
+      isFalsePositive: hasCouponIntent(text) && coupons.length === 0,
+      reason: coupons.length === 0 ? "no_valid_coupon_code" : null,
+    },
   };
 }
 
@@ -180,6 +194,11 @@ export async function extractCoupons(text, groupName = '') {
           aiReasoning: aiResult.reasoning,
           summaryWithAI: aiResult.summary_with_ai || null,
           summaryWithoutAI: aiResult.summary_without_ai || null,
+          telemetry: {
+            hasCouponIntent: true,
+            isFalsePositive: false,
+            reason: null,
+          },
         };
       }
       

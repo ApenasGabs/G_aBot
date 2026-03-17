@@ -49,6 +49,9 @@ const SHORTCUTS = {
   ajuda: "/help",
   help: "/help",
   cadastro: "/cadastro",
+  alerta: "/alerta",
+  compacto: "/alerta",
+  detalhado: "/alerta",
   filtros: "/meusfiltros",
   cupons: "/cupons",
   lojas: "/meuscupons",
@@ -201,9 +204,17 @@ export const parseCommand = (text) => {
 
   // Verifica atalhos
   if (SHORTCUTS[firstToken]) {
+    let shortcutArgs = argsText;
+    if (firstToken === "compacto" && !shortcutArgs) {
+      shortcutArgs = "compact";
+    }
+    if (firstToken === "detalhado" && !shortcutArgs) {
+      shortcutArgs = "full";
+    }
+
     return {
       command: SHORTCUTS[firstToken],
-      argsText,
+      argsText: shortcutArgs,
       type: "shortcut",
     };
   }

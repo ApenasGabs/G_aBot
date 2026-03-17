@@ -1,6 +1,6 @@
 {
   "name": "gabot",
-  "version": "0.0.1",
+  "version": "0.3.3",
   "scripts": {
     "start": "node gabot_ofertas.js",
     "dev": "node --watch gabot_ofertas.js",
@@ -11,7 +11,7 @@
     "pm2:restart": "pm2 restart ecosystem.config.cjs",
     "pm2:logs": "pm2 logs",
     "pm2:status": "pm2 status",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [],
   "type": "module",

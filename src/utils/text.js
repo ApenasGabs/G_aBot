@@ -24,10 +24,30 @@ export function compactText(text) {
   return normalizeText(text).replace(/\s+/g, "");
 }
 
-export function createOfferHash(text) {
+function normalizeOfferForHash(text) {
   const withoutUrls = String(text || "").replace(/https?:\/\/\S+/gi, " ");
   const withoutEmojis = withoutUrls.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ");
-  const normalized = normalizeText(withoutEmojis);
+
+  const normalizedBase = withoutEmojis
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const canonicalPrices = normalizedBase.replace(/r\$\s*[\d.,]+/gi, (raw) => {
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return " preco0 ";
+    return ` preco${digits} `;
+  });
+
+  const canonicalUnits = canonicalPrices
+    .replace(/\b(\d+)\s*(gb|tb|mhz|hz|w)\b/gi, "$1$2")
+    .replace(/\b(\d+)\s*(pol|polegada|polegadas)\b/gi, "$1pol");
+
+  return normalizeText(canonicalUnits);
+}
+
+export function createOfferHash(text) {
+  const normalized = normalizeOfferForHash(text);
   return createHash("md5").update(normalized).digest("hex");
 }
 

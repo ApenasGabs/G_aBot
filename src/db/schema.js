@@ -78,5 +78,20 @@ export function setupDatabase(db) {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_coupon_interests_user_store
     ON coupon_interests(user_id, store_normalized);
+
+    CREATE TABLE IF NOT EXISTS coupon_store_metrics (
+      store_normalized TEXT PRIMARY KEY,
+      store_name TEXT NOT NULL,
+      detected_count INTEGER NOT NULL DEFAULT 0,
+      matched_count INTEGER NOT NULL DEFAULT 0,
+      false_positive_count INTEGER NOT NULL DEFAULT 0,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+
+  const userColumns = db.prepare("PRAGMA table_info(users)").all();
+  const hasAlertMode = userColumns.some((column) => column.name === "alert_mode");
+  if (!hasAlertMode) {
+    db.exec("ALTER TABLE users ADD COLUMN alert_mode TEXT NOT NULL DEFAULT 'full';");
+  }
 }

@@ -1,7 +1,7 @@
 import makeWASocket, {
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
@@ -9,12 +9,13 @@ import { detectStoreFromText, extractCoupons } from "../services/couponExtractor
 import { logGroupMessage, logUserMessage } from "../services/messageLogger.js";
 import { createDispatchQueue } from "../utils/queue.js";
 import {
-  createOfferHash,
-  detectMessageType,
-  extractMessageText,
-  normalizeText,
+    createOfferHash,
+    detectMessageType,
+    extractMessageText,
+    normalizeText,
 } from "../utils/text.js";
 import { handlePrivateCommand } from "./commands.js";
+import { buildCouponAlertMessage } from "./couponAlertMessage.js";
 import { findMatches } from "./matching.js";
 import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
 
@@ -302,7 +303,10 @@ export async function initWhatsappBot({
             aiStore,
             summaryWithAI,
             summaryWithoutAI,
+            telemetry,
           } = extractionResult;
+
+          const detectedStore = detectStoreFromText(text, groupName, aiStore);
           
           if (coupons.length > 0) {
             console.log(`[Cupom] Método de extração: ${source}${aiStore ? ` | Loja (IA): ${aiStore}` : ''}`);
@@ -315,7 +319,6 @@ export async function initWhatsappBot({
             
             const allCouponInterests = repo.listAllCouponInterests();
             const contextNormalized = normalizeText(`${groupName} ${text}`);
-            const detectedStore = detectStoreFromText(text, groupName, aiStore);
             const normalizedDetectedStore = normalizeText(detectedStore);
 
             for (const couponItem of coupons) {
@@ -327,10 +330,12 @@ export async function initWhatsappBot({
                 isExhausted,
               });
 
-              // Dispara somente quando o cupom eh novo e ainda ativo
-              if (!result.isNew || isExhausted) {
+              // Dispara somente quando o cupom eh novo globalmente e ainda ativo
+              if (!result.isNewGlobal || isExhausted) {
                 continue;
               }
+
+              repo.incrementCouponStoreMetric(detectedStore, "detected", 1);
 
               const interestedUsers = allCouponInterests.filter((interest) => {
                 const byContext = contextNormalized.includes(interest.store_normalized);
@@ -340,19 +345,18 @@ export async function initWhatsappBot({
                 return byContext || byDetectedStore;
               });
 
+              if (interestedUsers.length > 0) {
+                repo.incrementCouponStoreMetric(detectedStore, "matched", 1);
+              }
+
               for (const interest of interestedUsers) {
-                const couponAlertParts = [
-                  "Novo cupom detectado!",
-                  `Codigo: ${couponItem.code}`,
-                  `Grupo: ${groupName}`,
-                  `Confianca: ${couponItem.confidence}%`,
-                ];
-
-                if (detectedStore !== "Loja nao identificada") {
-                  couponAlertParts.splice(1, 0, `Loja: ${detectedStore}`);
-                }
-
-                const couponAlert = couponAlertParts.join("\n");
+                const couponAlert = buildCouponAlertMessage({
+                  couponItem,
+                  groupName,
+                  detectedStore,
+                  interestStoreName: interest.store_name,
+                  alertMode: interest.alert_mode,
+                });
 
                 dispatchQueue.enqueue({
                   chatId: interest.user_id,
@@ -367,6 +371,8 @@ export async function initWhatsappBot({
                 .map((c) => `${c.code}(${c.confidence}%)`)
                 .join(", ")} ${isExhausted ? "(esgotado)" : ""}`
             );
+          } else if (telemetry?.isFalsePositive) {
+            repo.incrementCouponStoreMetric(detectedStore, "false_positive", 1);
           }
 
           const normalizedOfferText = normalizeText(text);

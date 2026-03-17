@@ -25,6 +25,8 @@ Olá! Use os atalhos rápidos:
 ↳ \`now\` : Ver cupons de hoje
 ↳ \`? loja\` : Buscar (ex: ? amazon)
 ↳ \`seguir loja\` : Alertas de novos cupons
+↳ \`lojas\` : Ver lojas seguidas
+↳ \`compacto\` : Alertas em modo resumido
 
 💡 *OUTROS*
 ↳ \`! texto\` : Enviar sugestão
@@ -55,6 +57,8 @@ export function getHelpMenu() {
 • \`seguir [loja]\` : Ativa alertas
 • \`parar [loja]\` : Desativa alertas
 • \`lojas\` : Suas lojas favoritas
+• \`alerta compacto\` : Reduz detalhes dos alertas
+• \`alerta detalhado\` : Volta ao formato completo
 
 📢 *COLABORAÇÃO*
 • \`! [texto]\` : Sugestão/Feedback
@@ -126,6 +130,8 @@ Use os comandos:
 • \`seguir [loja]\` : Ficar de olho nos cupons da loja
 • \`parar [loja]\` : Parar de seguir
 • \`lojas\` : Suas lojas
+• \`compacto\` : Ativar alerta resumido
+• \`detalhado\` : Ativar alerta completo
 
 Digite \`menu\` para voltar`;
 }
