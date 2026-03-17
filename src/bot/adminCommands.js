@@ -29,6 +29,9 @@ import {
 } from "./commandParser.js";
 import * as templates from "./menuTemplates.js";
 
+const pendingSysConfirmations = new Map();
+const SYS_CONFIRM_TTL_MS = 60 * 1000;
+
 /**
  * Manipulador principal de comandos admin
  * Suporta novos atalhos: ok, no, stats, ia
@@ -137,7 +140,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
 
   // Comando: sys - controle seguro de terminal
   if (firstToken === "sys" || firstToken === "terminal") {
-    await handleTerminalControl(reply, argsText);
+    await handleTerminalControl(reply, argsText, chatId);
     return;
   }
 
@@ -278,7 +281,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
 
   const sysMatch = normalizedCommand.match(/^\/adm\s+(?:sys|terminal)\s*(.*)$/);
   if (sysMatch) {
-    await handleTerminalControl(reply, (sysMatch[1] || "").trim());
+    await handleTerminalControl(reply, (sysMatch[1] || "").trim(), chatId);
     return;
   }
 
@@ -393,26 +396,21 @@ const showOllamaMenu = async (reply) => {
   );
 };
 
-const handleTerminalControl = async (reply, argsText) => {
-  const parsed = parseAdminTerminalAction(argsText, BOT_CONFIG.allowSystemReboot);
+const executeTerminalAction = async (reply, parsed) => {
+  await reply(`Executando: ${parsed.summary}...`);
 
-  if (!parsed.ok) {
-    if (parsed.usage) {
-      await reply(parsed.usage);
-      return;
-    }
-
-    await reply(`❌ ${parsed.error}`);
+  if (parsed.useSudo && !BOT_CONFIG.sudoPassword) {
+    await reply("❌ Senha sudo nao configurada. Defina BOT_SUDO_PASSWORD no .env.");
     return;
   }
-
-  await reply(`Executando: ${parsed.summary}...`);
 
   const result = await runTerminalCommand({
     command: parsed.command,
     args: parsed.args,
     cwd: PATHS.root,
     timeoutMs: parsed.timeoutMs,
+    useSudo: parsed.useSudo,
+    sudoPassword: BOT_CONFIG.sudoPassword,
   });
 
   const commandLine = `${parsed.command} ${parsed.args.join(" ")}`.trim();
@@ -427,14 +425,75 @@ const handleTerminalControl = async (reply, argsText) => {
   }
 
   if (result.stdout && result.stdout !== "(sem saida)") {
-    lines.push("", "Saida:", result.stdout);
+    lines.push("", "Saida (terminal):", result.stdout);
   }
 
-  if (!result.ok && result.stderr && result.stderr !== "(sem saida)") {
-    lines.push("", "Erro:", result.stderr);
+  if (result.stderr && result.stderr !== "(sem saida)") {
+    lines.push("", "Stderr (terminal):", result.stderr);
   }
 
   await reply(lines.join("\n"));
+};
+
+const handleTerminalControl = async (reply, argsText, chatId) => {
+  const normalizedArgs = String(argsText || "").trim().toLowerCase();
+
+  if (normalizedArgs === "confirmar" || normalizedArgs === "sim") {
+    const pending = pendingSysConfirmations.get(chatId);
+    if (!pending) {
+      await reply("⚠️ Nao ha comando pendente para confirmar.");
+      return;
+    }
+
+    if (Date.now() - pending.createdAt > SYS_CONFIRM_TTL_MS) {
+      pendingSysConfirmations.delete(chatId);
+      await reply("⚠️ Confirmacao expirada. Envie o comando novamente.");
+      return;
+    }
+
+    pendingSysConfirmations.delete(chatId);
+    await executeTerminalAction(reply, pending.parsed);
+    return;
+  }
+
+  if (normalizedArgs === "cancelar" || normalizedArgs === "nao") {
+    pendingSysConfirmations.delete(chatId);
+    await reply("✅ Comando cancelado.");
+    return;
+  }
+
+  const parsed = parseAdminTerminalAction(argsText, {
+    allowSystemReboot: BOT_CONFIG.allowSystemReboot,
+    allowSudoCommands: BOT_CONFIG.allowSudoCommands,
+  });
+
+  if (!parsed.ok) {
+    if (parsed.usage) {
+      await reply(parsed.usage);
+      return;
+    }
+
+    await reply(`❌ ${parsed.error}`);
+    return;
+  }
+
+  if (parsed.requiresConfirmation) {
+    pendingSysConfirmations.set(chatId, {
+      parsed,
+      createdAt: Date.now(),
+    });
+
+    await reply(
+      [
+        `⚠️ Tem certeza que deseja executar: ${parsed.summary}?`,
+        "Responda com: sys confirmar",
+        "Para cancelar: sys cancelar",
+      ].join("\n")
+    );
+    return;
+  }
+
+  await executeTerminalAction(reply, parsed);
 };
 
 const extractAskArgs = (rawText) => {

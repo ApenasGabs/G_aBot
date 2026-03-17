@@ -95,7 +95,9 @@ export function getAdminMenu() {
 • \`stats\` : Status e Versão
 • \`logs\` : Ver últimos erros
 • \`sys help\` : Comandos de terminal
+• \`sys ls\` : Listar arquivos do servidor
 • \`sys bot restart\` : Reiniciar bot via PM2
+• \`sys confirmar\` : Confirma acao critica
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 }

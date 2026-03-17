@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 
 const PACKAGE_NAME_REGEX = /^[a-z0-9@/._-]+$/i;
+const SAFE_ARG_REGEX = /^[a-z0-9_./:@=,+%-]+$/i;
+const READ_ONLY_COMMANDS = new Set(["ls", "pwd", "whoami", "date", "uname", "uptime"]);
 
 const trimOutput = (text, maxLen = 1200) => {
   const raw = String(text || "").trim();
@@ -10,6 +12,7 @@ const trimOutput = (text, maxLen = 1200) => {
 };
 
 const validatePackageName = (name) => PACKAGE_NAME_REGEX.test(String(name || ""));
+const validateSafeArgs = (args) => args.every((arg) => SAFE_ARG_REGEX.test(String(arg || "")));
 
 const usageText = () => {
   return [
@@ -22,16 +25,46 @@ const usageText = () => {
     "sys bot restart",
     "sys bot stop",
     "sys bot start",
-    "sys pc reboot confirmar",
+    "sys apt update",
+    "sys apt install [pacote]",
+    "sys pc reboot",
+    "sys ls",
+    "sys ls -la src",
+    "sys pwd",
     "",
+    "Confirmacao: para comandos criticos o bot pergunta 'tem certeza?'",
+    "Responda com: sys confirmar | sys cancelar",
+    "",
+    "Obs: comandos sudo exigem BOT_ALLOW_SUDO_COMMANDS=true e BOT_SUDO_PASSWORD no .env",
     "Obs: reboot exige BOT_ALLOW_SYSTEM_REBOOT=true no .env",
   ].join("\n");
 };
 
-export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
+export const parseAdminTerminalAction = (argsText, options = {}) => {
+  const {
+    allowSystemReboot = false,
+    allowSudoCommands = false,
+  } = options;
+
   const tokens = String(argsText || "").trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0 || tokens[0] === "help") {
     return { ok: false, usage: usageText() };
+  }
+
+  if (READ_ONLY_COMMANDS.has(tokens[0])) {
+    if (!validateSafeArgs(tokens.slice(1))) {
+      return { ok: false, error: "Argumentos invalidos para comando de leitura." };
+    }
+
+    return {
+      ok: true,
+      command: tokens[0],
+      args: tokens.slice(1),
+      summary: `Executar ${tokens.join(" ")}`,
+      timeoutMs: 15000,
+      useSudo: false,
+      requiresConfirmation: false,
+    };
   }
 
   if (tokens[0] === "status") {
@@ -41,6 +74,8 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
       args: [],
       summary: "Status da maquina",
       timeoutMs: 10000,
+      useSudo: false,
+      requiresConfirmation: false,
     };
   }
 
@@ -54,6 +89,8 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
           args: ["update"],
           summary: "Atualizar dependencias npm",
           timeoutMs: 180000,
+          useSudo: false,
+          requiresConfirmation: true,
         };
       }
 
@@ -68,6 +105,8 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
         args: ["update", pkgName],
         summary: `Atualizar pacote ${pkgName}`,
         timeoutMs: 180000,
+        useSudo: false,
+        requiresConfirmation: true,
       };
     }
 
@@ -86,10 +125,53 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
         args: ["install", pkgName],
         summary: `Instalar pacote ${pkgName}`,
         timeoutMs: 180000,
+        useSudo: false,
+        requiresConfirmation: true,
       };
     }
 
     return { ok: false, error: "Acao npm invalida. Use update ou install." };
+  }
+
+  if (tokens[0] === "apt") {
+    if (!allowSudoCommands) {
+      return {
+        ok: false,
+        error: "Comandos apt bloqueados. Defina BOT_ALLOW_SUDO_COMMANDS=true no .env.",
+      };
+    }
+
+    const action = tokens[1];
+    if (action === "update") {
+      return {
+        ok: true,
+        command: "apt",
+        args: ["update"],
+        summary: "Atualizar indices apt",
+        timeoutMs: 180000,
+        useSudo: true,
+        requiresConfirmation: true,
+      };
+    }
+
+    if (action === "install") {
+      const pkgName = tokens[2];
+      if (!pkgName || !validatePackageName(pkgName)) {
+        return { ok: false, error: "Informe um pacote valido. Ex: sys apt install htop" };
+      }
+
+      return {
+        ok: true,
+        command: "apt",
+        args: ["install", "-y", pkgName],
+        summary: `Instalar pacote do sistema ${pkgName}`,
+        timeoutMs: 300000,
+        useSudo: true,
+        requiresConfirmation: true,
+      };
+    }
+
+    return { ok: false, error: "Acao apt invalida. Use update ou install." };
   }
 
   if (tokens[0] === "bot") {
@@ -104,18 +186,12 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
       args: [action, "ecosystem.config.cjs"],
       summary: `Bot ${action}`,
       timeoutMs: 30000,
+      useSudo: false,
+      requiresConfirmation: true,
     };
   }
 
   if (tokens[0] === "pc" && tokens[1] === "reboot") {
-    const confirmation = tokens[2];
-    if (confirmation !== "confirmar") {
-      return {
-        ok: false,
-        error: "Para reiniciar o PC, use: sys pc reboot confirmar",
-      };
-    }
-
     if (!allowSystemReboot) {
       return {
         ok: false,
@@ -129,17 +205,22 @@ export const parseAdminTerminalAction = (argsText, allowSystemReboot) => {
       args: [],
       summary: "Reiniciar maquina",
       timeoutMs: 15000,
+      useSudo: true,
+      requiresConfirmation: true,
     };
   }
 
   return { ok: false, error: "Comando de sistema invalido. Use: sys help" };
 };
 
-export const runTerminalCommand = ({ command, args, cwd, timeoutMs }) => {
+export const runTerminalCommand = ({ command, args, cwd, timeoutMs, useSudo = false, sudoPassword = "" }) => {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const cmd = useSudo ? "sudo" : command;
+    const finalArgs = useSudo ? ["-S", "-k", command, ...args] : args;
+
+    const child = spawn(cmd, finalArgs, {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       shell: false,
     });
 
@@ -159,6 +240,11 @@ export const runTerminalCommand = ({ command, args, cwd, timeoutMs }) => {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+
+    if (useSudo) {
+      child.stdin.write(`${sudoPassword}\n`);
+      child.stdin.end();
+    }
 
     child.on("close", (code) => {
       clearTimeout(timer);
