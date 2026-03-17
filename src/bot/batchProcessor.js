@@ -12,7 +12,7 @@
  * @param {string} text - Texto com itens separados por vírgula
  * @returns {string[]} Array de itens processados
  */
-export function splitByComma(text) {
+export const splitByComma = (text) => {
   if (!text || typeof text !== "string") {
     return [];
   }
@@ -21,7 +21,7 @@ export function splitByComma(text) {
     .split(",")
     .map(item => item.trim())
     .filter(item => item.length > 0);
-}
+  };
 
 /**
  * Processa um comando com suporte a lote (múltiplos itens via vírgula)
@@ -34,12 +34,12 @@ export function splitByComma(text) {
  * @param {Object} options.context - Contexto (repo, user, etc)
  * @returns {Promise<Object>} Resultado do processamento
  */
-export async function processBatch({
+export const processBatch = async ({
   text,
   action,
   handler,
   context = {},
-}) {
+}) =>{
   if (!text || !handler) {
     return {
       success: false,
@@ -88,7 +88,7 @@ export async function processBatch({
   }
 
   return results;
-}
+};
 
 /**
  * Formata resultado do lote em mensagem legível
@@ -97,7 +97,7 @@ export async function processBatch({
  * @param {string} resultType - Tipo de resultado (filter, suggest, etc)
  * @returns {string} Mensagem formatada
  */
-export function formatBatchResult(result, resultType = "item") {
+export const formatBatchResult = (result, resultType = "item") => {
   if (!result.success && result.error) {
     return `❌ Erro: ${result.error}`;
   }
@@ -122,7 +122,7 @@ export function formatBatchResult(result, resultType = "item") {
   }
 
   return lines.join("\n") || "Nenhum resultado";
-}
+};
 
 /**
  * Processa comando com wildcard (*) para operações em lote
@@ -134,11 +134,11 @@ export function formatBatchResult(result, resultType = "item") {
  * @param {Function} options.handler - Função a executar para cada match
  * @returns {Promise<Object>} Resultado do processamento
  */
-export async function processWildcardBatch({
+export const processWildcardBatch = async ({
   pattern,
   items = [],
   handler,
-}) {
+})=>  {
   if (!pattern || !handler) {
     return {
       success: false,
@@ -189,7 +189,7 @@ export async function processWildcardBatch({
   }
 
   return results;
-}
+};
 
 /**
  * Valida se um texto contém múltiplos itens (separados por vírgula)
@@ -197,13 +197,13 @@ export async function processWildcardBatch({
  * @param {string} text - Texto a validar
  * @returns {boolean} True se houver múltiplos itens
  */
-export function hasMultipleItems(text) {
+export const hasMultipleItems = (text) => {
   if (!text || typeof text !== "string") {
     return false;
   }
 
   return text.includes(",");
-}
+};
 
 /**
  * Valida se um padrão contém wildcard
@@ -211,9 +211,9 @@ export function hasMultipleItems(text) {
  * @param {string} pattern - Padrão a validar
  * @returns {boolean} True se contiver *
  */
-export function hasWildcard(pattern) {
+export const hasWildcard = (pattern) => {
   return typeof pattern === "string" && pattern.includes("*");
-}
+};
 
 /**
  * Limita a quantidade de itens em um lote para evitar abuso
@@ -222,7 +222,7 @@ export function hasWildcard(pattern) {
  * @param {number} maxItems - Quantidade máxima permitida (default: 10)
  * @returns {Object} {valid: boolean, itemCount: number, error?: string}
  */
-export function validateBatchSize(text, maxItems = 10) {
+export const validateBatchSize = (text, maxItems = 10) => {
   if (!text || typeof text !== "string") {
     return { valid: false, itemCount: 0, error: "Texto vazio" };
   }
@@ -239,4 +239,4 @@ export function validateBatchSize(text, maxItems = 10) {
   }
 
   return { valid: true, itemCount };
-}
+};

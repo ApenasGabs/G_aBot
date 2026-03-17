@@ -4,6 +4,7 @@
  */
 
 import {
+  processBatch,
   splitByComma,
   validateBatchSize
 } from "./batchProcessor.js";
@@ -24,9 +25,9 @@ const userSessions = new Map();
  * @param {string} text - Texto do comando
  * @returns {Object} Objeto estruturado do comando
  */
-export function parseCommand(text) {
+export const parseCommand = (text)=> {
   return parseCommandNew(text);
-}
+};
 
 /**
  * Extrai código de convite do link do WhatsApp
@@ -34,10 +35,10 @@ export function parseCommand(text) {
  * @param {string} link - Link do grupo
  * @returns {string|null} Código de convite ou null
  */
-function extractInviteCode(link) {
+const extractInviteCode = (link) => {
   const match = link.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]{10,})/i);
   return match ? match[1] : null;
-}
+};
 
 /**
  * Converte status de sugestão para label em português
@@ -45,7 +46,7 @@ function extractInviteCode(link) {
  * @param {string} status - Status da sugestão
  * @returns {string} Label legível
  */
-function suggestionStatusLabel(status) {
+const suggestionStatusLabel = (status) => {
   const statusMap = {
     pending: "⏳ pendente",
     read: "👁️ lida",
@@ -53,14 +54,14 @@ function suggestionStatusLabel(status) {
     rejected: "❌ rejeitada",
   };
   return statusMap[status] || status || "desconhecido";
-}
+};
 
 /**
  * Manipulador de comando /add com suporte a lote
  * 
  * @param {Object} options - Configurações
  */
-async function handleAddCommand({ chatId, name, argsText, repo, reply }) {
+const handleAddCommand = async ({ chatId, name, argsText, repo, reply }) => {
   if (!argsText) {
     await reply("❌ Contexto incompleto. Uso: `+ termo1, termo2`");
     return;
@@ -76,44 +77,47 @@ async function handleAddCommand({ chatId, name, argsText, repo, reply }) {
   }
 
   const items = splitByComma(argsText);
-  
+  const result = await processBatch({
+    text: argsText,
+    action: "add",
+    handler: async ({ item }) => ({
+      success: repo.addKeyword(chatId, item),
+    }),
+  });
+
+  if (!result.success) {
+    await reply(`❌ ${result.error}`);
+    return;
+  }
+
   if (items.length === 1) {
-    // Comando único
-    const inserted = repo.addKeyword(chatId, items[0]);
+    const [single] = result.processed;
     await reply(
-      inserted
+      single?.success
         ? templates.getFilterAddedMessage(items[0])
         : templates.getFilterDuplicateError(items[0])
     );
-  } else {
-    // Processamento em lote
-    const successful = [];
-    const duplicates = [];
-
-    for (const term of items) {
-      if (repo.addKeyword(chatId, term)) {
-        successful.push(term);
-      } else {
-        duplicates.push(term);
-      }
-    }
-
-    let message = "";
-    if (successful.length > 0) {
-      message += templates.getFilterAddedMessage(successful) + "\n";
-    }
-    if (duplicates.length > 0) {
-      message += `⚠️ Ja existiam (${duplicates.length}): ${duplicates.join(", ")}`;
-    }
-
-    await reply(message.trim());
+    return;
   }
-}
+
+  const successful = result.processed.filter((entry) => entry.success).map((entry) => entry.item);
+  const duplicates = result.processed.filter((entry) => !entry.success).map((entry) => entry.item);
+
+  let message = "";
+  if (successful.length > 0) {
+    message += templates.getFilterAddedMessage(successful) + "\n";
+  }
+  if (duplicates.length > 0) {
+    message += `⚠️ Ja existiam (${duplicates.length}): ${duplicates.join(", ")}`;
+  }
+
+  await reply(message.trim());
+};
 
 /**
  * Manipulador de comando /remover com suporte a lote
  */
-async function handleRemoveCommand({ chatId, argsText, repo, reply }) {
+const handleRemoveCommand = async ({ chatId, argsText, repo, reply }) => {
   if (!argsText) {
     await reply("❌ Contexto incompleto. Uso: `- termo1, termo2`");
     return;
@@ -127,36 +131,42 @@ async function handleRemoveCommand({ chatId, argsText, repo, reply }) {
 
   const items = splitByComma(argsText);
 
+  const result = await processBatch({
+    text: argsText,
+    action: "remove",
+    handler: async ({ item }) => ({
+      success: repo.removeKeyword(chatId, item),
+    }),
+  });
+
+  if (!result.success) {
+    await reply(`❌ ${result.error}`);
+    return;
+  }
+
   if (items.length === 1) {
-    const removed = repo.removeKeyword(chatId, items[0]);
+    const [single] = result.processed;
     await reply(
-      removed
+      single?.success
         ? templates.getFilterRemovedMessage(items[0])
         : templates.getFilterNotFoundError(items[0])
     );
-  } else {
-    const successful = [];
-    const notFound = [];
-
-    for (const term of items) {
-      if (repo.removeKeyword(chatId, term)) {
-        successful.push(term);
-      } else {
-        notFound.push(term);
-      }
-    }
-
-    let message = "";
-    if (successful.length > 0) {
-      message += templates.getFilterRemovedMessage(successful) + "\n";
-    }
-    if (notFound.length > 0) {
-      message += `⚠️ Nao encontrados (${notFound.length}): ${notFound.join(", ")}`;
-    }
-
-    await reply(message.trim());
+    return;
   }
-}
+
+  const successful = result.processed.filter((entry) => entry.success).map((entry) => entry.item);
+  const notFound = result.processed.filter((entry) => !entry.success).map((entry) => entry.item);
+
+  let message = "";
+  if (successful.length > 0) {
+    message += templates.getFilterRemovedMessage(successful) + "\n";
+  }
+  if (notFound.length > 0) {
+    message += `⚠️ Nao encontrados (${notFound.length}): ${notFound.join(", ")}`;
+  }
+
+  await reply(message.trim());
+};
 
 /**
  * Manipulador principal de comandos privados
@@ -165,7 +175,7 @@ async function handleRemoveCommand({ chatId, argsText, repo, reply }) {
  * @async
  * @param {Object} options - Configurações
  */
-export async function handlePrivateCommand({
+export const handlePrivateCommand = async ({
   client,
   repo,
   chatId,
@@ -175,7 +185,8 @@ export async function handlePrivateCommand({
   resolveInviteGroupName,
   notifyAdminSuggestion,
   handleUnmappedPrivateMessage,
-}) {
+  handleAdminCommand,
+})=> {
   const reply = async (messageText) => {
     if (sendPrivateReply) {
       await sendPrivateReply(chatId, messageText);
@@ -280,7 +291,7 @@ export async function handlePrivateCommand({
     return;
   }
 
-  const { command, argsText, actionPrefix } = parsed;
+  let { command, argsText, actionPrefix } = parsed;
 
   // ========== NOVOS COMANDOS COM PREFIXOS (+ - ? ! . g) ==========
   
@@ -305,8 +316,7 @@ export async function handlePrivateCommand({
       await reply(templates.getMissingArgumentError("?", "? amazon"));
       return;
     }
-    // Delegua para o comando /cupom
-    command = "/cupom";
+    // Mantém fluxo no handler padrão /cupom abaixo
   }
 
   // Comando: ! (sugerir/feedback)
@@ -316,14 +326,28 @@ export async function handlePrivateCommand({
       await reply(templates.getMissingArgumentError("!", "! o bot podia ter X funcionalidade"));
       return;
     }
-    // Delegua para o comando /sugerir
-    command = "/sugerir";
+    // Mantém fluxo no handler padrão /sugerir abaixo
   }
 
   // Comando: . (chat com IA)
   if (command === "/adm ia ask" && actionPrefix === ".") {
     await react(getReactionEmoji("."));
-    // Será tratado em adminCommands.js
+    if (!argsText) {
+      await reply(templates.getMissingArgumentError(".", ". analise esta promocao"));
+      return;
+    }
+
+    if (handleAdminCommand) {
+      await handleAdminCommand({
+        client,
+        repo,
+        chatId,
+        text: `ia ask ${argsText}`,
+      });
+      return;
+    }
+
+    await reply("❌ Comando de IA indisponivel no momento.");
     return;
   }
 
@@ -334,16 +358,27 @@ export async function handlePrivateCommand({
       await reply(templates.getMissingArgumentError("g", "g chat.whatsapp.com/SEUCODIGO"));
       return;
     }
-    // Delegua para o comando /sugerirgrupo
-    command = "/sugerirgrupo";
+    // Mantém fluxo no handler padrão /sugerirgrupo abaixo
   }
 
   // ========== COMANDOS TRADICIONAIS (LEGADO + NOVOS) ==========
 
   // Menu numérico
   if (command === "menu_1") {
-    repo.upsertUser(chatId, name);
-    await reply("✅ Cadastro ativado! Agora você pode adicionar filtros.");
+    const { isNew } = repo.upsertUser(chatId, name);
+    await reply(
+      isNew
+        ? [
+            "✅ Cadastro concluido!",
+            "",
+            "Adicione filtros para receber alertas:",
+            "+ notebook, ssd, rtx 4060",
+            "",
+            "Para cupons automaticos por loja:",
+            "seguir amazon",
+          ].join("\n")
+        : "✅ Voce ja estava cadastrado. Use + termo para adicionar filtros."
+    );
     await showFiltersMenu(reply);
     userSessions.set(chatId, { context: "filters" });
     return;
@@ -373,14 +408,31 @@ export async function handlePrivateCommand({
     return;
   }
 
+  if (command === "/help") {
+    await showHelpMenu(reply);
+    return;
+  }
+
   if (command === "/" || command === "/menu" || command === "/ajuda") {
     await showMainMenu(reply);
     return;
   }
 
   if (command === "/cadastro") {
-    repo.upsertUser(chatId, name);
-    await reply("Cadastro concluido. Agora use /add [termo] para monitorar ofertas.");
+    const { isNew } = repo.upsertUser(chatId, name);
+    await reply(
+      isNew
+        ? [
+            "✅ Cadastro concluido!",
+            "",
+            "Adicione filtros para receber alertas:",
+            "+ notebook, ssd, rtx 4060",
+            "",
+            "Para cupons automaticos por loja:",
+            "seguir amazon",
+          ].join("\n")
+        : "✅ Voce ja esta cadastrado! Use + termo para monitorar ofertas e seguir loja para cupons."
+    );
     return;
   }
 
@@ -622,34 +674,34 @@ export async function handlePrivateCommand({
   }
 
   await showMainMenu(reply);
-}
+};
 
 // ========== FUNÇÕES AUXILIARES DE MENU ==========
 
 /**
  * Exibe o menu principal
  */
-async function showMainMenu(reply) {
+const showMainMenu = async (reply) => {
   await reply(templates.getMainMenu());
-}
+};
 
 /**
  * Exibe o menu de filtros
  */
-async function showFiltersMenu(reply) {
+const showFiltersMenu = async (reply) => {
   await reply(templates.getFiltersMenu());
-}
+};
 
 /**
  * Exibe o menu de cupons
  */
-async function showCouponsMenu(reply) {
+const showCouponsMenu = async (reply) => {
   await reply(templates.getCouponsMenu());
-}
+};
 
 /**
  * Exibe menu de ajuda
  */
-async function showHelpMenu(reply) {
+const showHelpMenu = async (reply) => {
   await reply(templates.getHelpMenu());
-}
+};

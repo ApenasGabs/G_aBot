@@ -192,7 +192,7 @@ export async function initWhatsappBot({
                   "",
                   `Sugestao: ${suggestionText}`,
                   "",
-                  "Use: adm5 s" + suggestionId + " ou adm6 s" + suggestionId,
+                  "Use: ok s" + suggestionId + " ou no s" + suggestionId,
                 ].join("\n");
               } else {
                 message = [
@@ -203,7 +203,7 @@ export async function initWhatsappBot({
                   `Nome do grupo: ${groupName || "Nao identificado"}`,
                   `Link: ${groupLink}`,
                   "",
-                  "Use: adm5 g" + suggestionId + " ou adm6 g" + suggestionId,
+                  "Use: ok g" + suggestionId + " ou no g" + suggestionId,
                 ].join("\n");
               }
 
@@ -220,6 +220,10 @@ export async function initWhatsappBot({
               resolveInviteGroupName,
               notifyAdminSuggestion,
               handleUnmappedPrivateMessage,
+              handleAdminCommand: async (payload) => {
+                const { handleAdminCommand } = await import("./adminCommands.js");
+                return handleAdminCommand(payload);
+              },
             });
             continue;
           }
@@ -260,7 +264,14 @@ export async function initWhatsappBot({
             const isAdminCommand =
               textLower.startsWith("/adm") ||
               textLower.startsWith("/admin") ||
-              /^adm[0-9a-z]/.test(textLower);
+              /^adm[0-9a-z]/.test(textLower) ||
+              /^ok\s+/.test(textLower) ||
+              /^no\s+/.test(textLower) ||
+              textLower === "stats" ||
+              textLower === "ia" ||
+              textLower.startsWith("ia ") ||
+              textLower === "logs" ||
+              textLower.startsWith(".");
 
             if (isAdminCommand) {
               console.log(`[ADMIN DEBUG] Comando admin detectado: "${textLower}"`);
@@ -361,7 +372,7 @@ export async function initWhatsappBot({
           const normalizedOfferText = normalizeText(text);
           if (!normalizedOfferText) continue;
 
-          const hashId = createOfferHash(normalizedOfferText);
+          const hashId = createOfferHash(text);
           const isNewOffer = repo.markOfferAsProcessed(hashId);
           if (!isNewOffer) continue;
 

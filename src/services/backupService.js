@@ -49,9 +49,23 @@ export async function runBackup({ dbPath, backupsDir, maxFiles }) {
   }
 }
 
-export function startBackupScheduler({ dbPath, backupsDir, intervalMs, maxFiles }) {
+export function startBackupScheduler({
+  dbPath,
+  backupsDir,
+  intervalMs,
+  maxFiles,
+  cleanupProcessedOffers,
+  processedOffersTtlDays = 7,
+}) {
   const run = async () => {
     await runBackup({ dbPath, backupsDir, maxFiles });
+
+    if (typeof cleanupProcessedOffers === "function") {
+      const removed = cleanupProcessedOffers(processedOffersTtlDays);
+      if (removed > 0) {
+        console.log(`Cleanup processed_offers: ${removed} registros removidos.`);
+      }
+    }
   };
 
   run().catch((error) => {

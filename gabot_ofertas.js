@@ -52,6 +52,8 @@ async function main() {
     backupsDir: PATHS.backupsDir,
     intervalMs: BACKUP_CONFIG.intervalMs,
     maxFiles: BACKUP_CONFIG.maxFiles,
+    cleanupProcessedOffers: (maxAgeDays) => repo.cleanupProcessedOffers(maxAgeDays),
+    processedOffersTtlDays: BACKUP_CONFIG.processedOffersTtlDays,
   });
 
   if (isAIEnabled()) {

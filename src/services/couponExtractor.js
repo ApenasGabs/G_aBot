@@ -15,6 +15,7 @@ const STORE_PATTERNS = [
 ];
 
 const COUPON_PATTERNS = [
+  { regex: /`([A-Z0-9]{3,20})`/gi, baseScore: 80 },
   { regex: /cupom\s*:?\s*([A-Z0-9]{4,20})/gi, baseScore: 65 },
   { regex: /c[óo]digo\s*:?\s*([A-Z0-9]{4,20})/gi, baseScore: 65 },
   { regex: /use\s+o?\s*cupom\s+([A-Z0-9]{4,20})/gi, baseScore: 70 },
@@ -36,7 +37,22 @@ const COMMON_WORD_BLOCKLIST = new Set([
   "GRUPO",
   "SITE",
   "LOJA",
+  "EXCLUSIVO",
+  "PRIME",
+  "ABAIXO",
+  "AUTOCUIDADO",
 ]);
+
+const PAGE_COUPON_PATTERNS = [
+  /resgate\s+cupom\s+(do|da|no)\s+(an[uú]ncio|p[aá]gina)/i,
+  /cupom\s+(do|da|no)\s+(an[uú]ncio|p[aá]gina)/i,
+  /cupom\s+na\s+p[aá]gina/i,
+  /cupom\s+no\s+an[uú]ncio/i,
+];
+
+function hasExplicitCouponCode(text) {
+  return /`[A-Z0-9]{3,20}`|(?:cupom|c[óo]digo)\s*:?\s*[A-Z0-9]{4,20}|(?:use\s+o?\s*cupom|c[óo]digo\s+de\s+desconto)\s*:?\s*[A-Z0-9]{4,20}/i.test(text);
+}
 
 function scoreCoupon(code, baseScore) {
   let score = baseScore;
@@ -74,6 +90,20 @@ function extractCouponsRegex(text) {
   const isExhausted = EXHAUSTED_PATTERNS.some((pattern) =>
     pattern.test(normalizedText)
   );
+
+  const looksLikePageCouponWithoutCode =
+    PAGE_COUPON_PATTERNS.some((pattern) => pattern.test(text)) &&
+    !hasExplicitCouponCode(text);
+
+  if (looksLikePageCouponWithoutCode) {
+    return {
+      coupons: [],
+      isExhausted,
+      source: 'regex',
+      summaryWithAI: null,
+      summaryWithoutAI: "Resumo sem IA: cupom referenciado sem codigo explicito (pagina/anuncio).",
+    };
+  }
 
   for (const pattern of COUPON_PATTERNS) {
     const matches = text.matchAll(pattern.regex);
@@ -132,18 +162,18 @@ export async function extractCoupons(text, groupName = '') {
     try {
       const aiResult = await parseWithAI(text, groupName);
       
-      if (aiResult && aiResult.is_coupon && aiResult.coupon_code) {
+      if (aiResult && aiResult.is_coupon && Array.isArray(aiResult.coupon_codes) && aiResult.coupon_codes.length > 0) {
         console.log('[Coupon Extractor] IA detectou cupom:', {
-          code: aiResult.coupon_code,
+          codes: aiResult.coupon_codes,
           store: aiResult.store_name,
           confidence: aiResult.confidence,
         });
         
         return {
-          coupons: [{
-            code: aiResult.coupon_code.toUpperCase(),
+          coupons: aiResult.coupon_codes.map((code) => ({
+            code,
             confidence: aiResult.confidence,
-          }],
+          })),
           isExhausted: aiResult.is_exhausted || false,
           source: 'ai',
           aiStore: aiResult.store_name, // Loja identificada pela IA

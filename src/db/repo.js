@@ -9,6 +9,13 @@ export function createRepo(db) {
       is_active = 1
   `);
 
+  const findUserByChatIdStmt = db.prepare(`
+    SELECT chat_id
+    FROM users
+    WHERE chat_id = ?
+    LIMIT 1
+  `);
+
   const addKeywordStmt = db.prepare(`
     INSERT INTO keywords (user_id, term, term_normalized)
     VALUES (?, ?, ?)
@@ -37,6 +44,11 @@ export function createRepo(db) {
     INSERT INTO processed_offers (hash_id)
     VALUES (?)
     ON CONFLICT(hash_id) DO NOTHING
+  `);
+
+  const cleanupProcessedOffersStmt = db.prepare(`
+    DELETE FROM processed_offers
+    WHERE created_at < datetime('now', '-' || ? || ' days')
   `);
 
   const addGroupSuggestionStmt = db.prepare(`
@@ -321,7 +333,9 @@ export function createRepo(db) {
 
   return {
     upsertUser(chatId, name) {
+      const existing = findUserByChatIdStmt.get(chatId);
       upsertUserStmt.run(chatId, name || null);
+      return { isNew: !existing };
     },
     addKeyword(chatId, term) {
       const normalized = normalizeText(term);
@@ -341,6 +355,11 @@ export function createRepo(db) {
     markOfferAsProcessed(hashId) {
       const result = insertProcessedOfferStmt.run(hashId);
       return result.changes > 0;
+    },
+    cleanupProcessedOffers(maxAgeDays = 7) {
+      const safeDays = Number.isFinite(maxAgeDays) ? Math.max(1, Math.floor(maxAgeDays)) : 7;
+      const result = cleanupProcessedOffersStmt.run(safeDays);
+      return result.changes;
     },
     addGroupSuggestion({ userId, userName, groupLink, inviteCode, groupName }) {
       const result = addGroupSuggestionStmt.run(

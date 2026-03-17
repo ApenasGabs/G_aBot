@@ -75,4 +75,5 @@ export const BOT_CONFIG = {
 export const BACKUP_CONFIG = {
   intervalMs: 24 * 60 * 60 * 1000,
   maxFiles: 30,
+  processedOffersTtlDays: parseInt(process.env.PROCESSED_OFFERS_TTL_DAYS || "7", 10),
 };

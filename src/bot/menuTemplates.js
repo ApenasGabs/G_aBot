@@ -19,7 +19,7 @@ Olá! Use os atalhos rápidos:
 🔍 *FILTROS*
 ↳ \`+ termo\` : Adicionar (ex: + tv, pc)
 ↳ \`- termo\` : Remover filtro
-↳ \`list\` : Meus filtros ativos
+↳ \`filtros\` : Meus filtros ativos
 
 🎟️ *CUPONS*
 ↳ \`now\` : Ver cupons de hoje
@@ -123,7 +123,7 @@ export function getCouponsMenu() {
 Use os comandos:
 • \`now\` : Cupons recentes
 • \`? [loja]\` : Buscar por loja
-• \`seguir [loja]\` : Seguir loja
+• \`seguir [loja]\` : Ficar de olho nos cupons da loja
 • \`parar [loja]\` : Parar de seguir
 • \`lojas\` : Suas lojas
 

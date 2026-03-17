@@ -25,7 +25,10 @@ export function compactText(text) {
 }
 
 export function createOfferHash(text) {
-  return createHash("md5").update(text).digest("hex");
+  const withoutUrls = String(text || "").replace(/https?:\/\/\S+/gi, " ");
+  const withoutEmojis = withoutUrls.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ");
+  const normalized = normalizeText(withoutEmojis);
+  return createHash("md5").update(normalized).digest("hex");
 }
 
 export function detectMessageType(message) {

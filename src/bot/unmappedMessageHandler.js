@@ -10,7 +10,7 @@ function isSkippableText(text) {
   if (normalized.startsWith("/")) return true;
   if (/^[1-9]$/.test(normalized)) return true;
 
-  const commandWords = new Set(["menu", "ajuda", "cadastro", "filtros", "cupons"]);
+  const commandWords = new Set(["menu", "ajuda", "cadastro", "filtros", "list", "cupons"]);
   const firstWord = normalized.split(/\s+/)[0];
   if (commandWords.has(firstWord)) return true;
 

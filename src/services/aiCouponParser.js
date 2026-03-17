@@ -69,7 +69,7 @@ TRATAMENTO DOS DADOS (obrigatório):
 Formato de resposta EXATO:
 {
   "is_coupon": true/false,
-  "coupon_code": "CODIGO123" ou null,
+    "coupon_codes": ["CODIGO123", "CODIGO456"] ou [],
   "store_name": "Nome da Loja" ou null,
   "confidence": 0-100,
   "is_exhausted": true/false,
@@ -184,7 +184,7 @@ async function callOllamaAPI(messageText, groupName = '') {
  * Retorno esperado:
  * {
  *   is_coupon: boolean,
- *   coupon_code: string|null,
+ *   coupon_codes: string[],
  *   store_name: string|null,
  *   confidence: number (0-100),
  *   is_exhausted: boolean,
@@ -224,8 +224,19 @@ export async function parseWithAI(messageText, groupName = '') {
       ? result.summary_with_ai.trim()
       : (result.reasoning || "Resumo com IA indisponivel");
 
+  // Compatibilidade: aceita schema legado com coupon_code (singular).
+  const normalizedCodes = Array.isArray(result.coupon_codes)
+    ? result.coupon_codes
+    : (result.coupon_code ? [result.coupon_code] : []);
+
+  result.coupon_codes = [...new Set(
+    normalizedCodes
+      .map((code) => String(code || "").trim().toUpperCase())
+      .filter((code) => /^[A-Z0-9]{3,20}$/.test(code))
+  )];
+
   result.summary_without_ai = buildSummaryWithoutAI({
-    couponCode: result.coupon_code,
+    couponCode: result.coupon_codes[0] || null,
     storeName: result.store_name,
     isExhausted: !!result.is_exhausted,
   });

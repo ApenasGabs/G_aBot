@@ -3,6 +3,9 @@
  * Suporta novos comandos simplificados: ok, no, stats, ia
  */
 
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { PATHS } from "../config.js";
 import {
   askOllamaInstance,
   controlOllamaInstance,
@@ -12,6 +15,7 @@ import {
 } from "../services/ollamaManager.js";
 import {
   hasWildcard,
+  processWildcardBatch,
   splitByComma
 } from "./batchProcessor.js";
 import {
@@ -28,7 +32,7 @@ import * as templates from "./menuTemplates.js";
  * 
  * @async
  */
-export async function handleAdminCommand({ client, repo, chatId, text }) {
+export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   console.log(`[ADMIN CMD] Recebeu comando: "${text}"`);
   
   const reply = async (messageText) => {
@@ -153,6 +157,22 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     return;
   }
 
+  // Comando: . [pergunta] - prompt IA direto
+  if (firstToken === ".") {
+    if (!argsText) {
+      await reply("❌ Uso: . [pergunta]\nExemplo: . extraia cupom e loja desta mensagem");
+      return;
+    }
+    await handleOllamaAsk(reply, argsText);
+    return;
+  }
+
+  // Comando: logs - últimos logs consolidados
+  if (firstToken === "logs") {
+    await handleRecentLogs(reply);
+    return;
+  }
+
   // ========== COMANDOS LEGACY (COMPATIBILIDADE) ==========
 
   const tokens = trimmed.split(/\s+/);
@@ -236,6 +256,11 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     return;
   }
 
+  if (normalizedCommand === "/adm logs") {
+    await handleRecentLogs(reply);
+    return;
+  }
+
   if (normalizedCommand === "/adm ia") {
     await showOllamaMenu(reply);
     return;
@@ -290,17 +315,17 @@ export async function handleAdminCommand({ client, repo, chatId, text }) {
     await updateSuggestionStatus(reply, repo, client, type, id, "rejected");
     return;
   }
-}
+};
 
-function statusLabel(status) {
+const statusLabel = (status) => {
   if (status === "pending") return "pendente";
   if (status === "read") return "lida";
   if (status === "approved") return "aprovada";
   if (status === "rejected") return "rejeitada";
   return status || "desconhecido";
-}
+};
 
-async function notifySuggestionStatusChange(client, suggestionType, suggestion, status) {
+const notifySuggestionStatusChange = async (client, suggestionType, suggestion, status) => {
   if (!client || !suggestion?.user_id) return;
 
   const idPrefix = suggestionType === "g" ? "g" : "s";
@@ -326,35 +351,43 @@ async function notifySuggestionStatusChange(client, suggestionType, suggestion, 
   } catch (error) {
     console.log(`[ADMIN CMD] Nao foi possivel notificar ${suggestion.user_id}: ${error.message}`);
   }
-}
+};
 
-async function showAdminMenu(reply) {
+const showAdminMenu = async (reply) => {
   await reply(templates.getAdminMenu());
-}
+};
 
-async function showOllamaMenu(reply) {
+const showOllamaMenu = async (reply) => {
   await reply(
     [
       "🤖 *Painel IA / Ollama*",
       "",
-      "adm9 [instancia] - status",
-      "adm10 [instancia] - start",
-      "adm11 [instancia] - stop",
-      "adm12 [instancia] - restart",
-      "adm13 - listar instancias",
-      "adm14 [instancia::]pergunta - testar prompt",
+      "ia - menu IA",
+      "ia status [instancia] - status",
+      "ia reset [instancia] - restart",
+      ". [pergunta] - prompt rapido na IA",
       "",
       "Exemplos:",
-      "adm9",
-      "adm10 local",
-      "adm12 local",
-      "adm14 qual o melhor cupom da mensagem X?",
-      "adm14 local::extraia cupom e loja desta mensagem: ...",
+      "ia",
+      "ia status",
+      "ia reset local",
+      ". qual o melhor cupom da mensagem X?",
+      ". local::extraia cupom e loja desta mensagem: ...",
     ].join("\n")
   );
-}
+};
 
-function extractAskArgs(rawText) {
+const extractAskArgs = (rawText) => {
+  const dotShortcut = rawText.match(/^\.\s+([\s\S]+)$/i);
+  if (dotShortcut?.[1]) {
+    return dotShortcut[1].trim();
+  }
+
+  const iaAsk = rawText.match(/^ia\s+(?:ask|perguntar|prompt)\s+([\s\S]+)$/i);
+  if (iaAsk?.[1]) {
+    return iaAsk[1].trim();
+  }
+
   const directAlias = rawText.match(/^\/?adm14\s+([\s\S]+)$/i);
   if (directAlias?.[1]) {
     return directAlias[1].trim();
@@ -366,9 +399,9 @@ function extractAskArgs(rawText) {
   }
 
   return null;
-}
+};
 
-function parseAskPayload(input) {
+const parseAskPayload = (input) => {
   const value = (input || "").trim();
   if (!value) {
     return { instanceName: "local", prompt: "" };
@@ -384,13 +417,13 @@ function parseAskPayload(input) {
   }
 
   return { instanceName: "local", prompt: value };
-}
+};
 
-async function handleOllamaAsk(reply, askInput) {
+const handleOllamaAsk = async (reply, askInput) => {
   const { instanceName, prompt } = parseAskPayload(askInput);
 
   if (!prompt) {
-    await reply("Uso: adm14 [instancia::]pergunta\nEx: adm14 local::extraia cupom e loja desta mensagem");
+    await reply("Uso: . [instancia::]pergunta\nEx: . local::extraia cupom e loja desta mensagem");
     return;
   }
 
@@ -417,9 +450,9 @@ async function handleOllamaAsk(reply, askInput) {
       answer,
     ].join("\n")
   );
-}
+};
 
-async function handleListInstances(reply) {
+const handleListInstances = async (reply) => {
   const instances = listConfiguredInstanceNames();
   if (instances.length === 0) {
     await reply("Nenhuma instancia Ollama configurada.");
@@ -427,9 +460,9 @@ async function handleListInstances(reply) {
   }
 
   await reply(`Instancias configuradas: ${instances.join(", ")}`);
-}
+};
 
-async function handleOllamaStatus(reply, instanceName) {
+const handleOllamaStatus = async (reply, instanceName) => {
   if (instanceName) {
     const status = await getOllamaInstanceStatus(instanceName);
     await reply(formatOllamaStatus(status));
@@ -443,9 +476,9 @@ async function handleOllamaStatus(reply, instanceName) {
     lines.push("");
   }
   await reply(lines.join("\n").trim());
-}
+};
 
-async function handleOllamaControl(reply, action, instanceName) {
+const handleOllamaControl = async (reply, action, instanceName) => {
   const target = instanceName || "local";
   await reply(`Executando '${action}' na instancia '${target}'...`);
 
@@ -465,9 +498,9 @@ async function handleOllamaControl(reply, action, instanceName) {
 
   const errorText = result.error || result.stderr || "falha ao executar acao";
   await reply([`❌ Falha em '${action}' para '${target}': ${errorText}`, statusMessage].join("\n\n"));
-}
+};
 
-function formatOllamaStatus(status) {
+const formatOllamaStatus = (status) => {
   const instance = status.instanceName || "desconhecida";
   const baseUrl = status.baseUrl || "-";
   const onlineLabel = status.online ? "online" : "offline";
@@ -488,9 +521,9 @@ function formatOllamaStatus(status) {
   }
 
   return lines.join("\n");
-}
+};
 
-async function showBotStatus(reply) {
+const showBotStatus = async (reply) => {
   const uptime = process.uptime();
   const uptimeMinutes = Math.floor(uptime / 60);
   const uptimeSeconds = Math.floor(uptime % 60);
@@ -514,9 +547,9 @@ async function showBotStatus(reply) {
       "Bot operacional 🟢",
     ].join("\n")
   );
-}
+};
 
-async function listAllSuggestions(reply, repo, client) {
+const listAllSuggestions = async (reply, repo, client) => {
   const justReadGroups = repo.markPendingGroupSuggestionsAsRead(10);
   const justReadGeneral = repo.markPendingGeneralSuggestionsAsRead(10);
 
@@ -564,9 +597,9 @@ async function listAllSuggestions(reply, repo, client) {
 
   lines.push("Use: /adm aprovar [tipo][id] ou /adm rejeitar [tipo][id]");
   await reply(lines.join("\n"));
-}
+};
 
-async function listGroupSuggestions(reply, repo, client) {
+const listGroupSuggestions = async (reply, repo, client) => {
   const justReadGroups = repo.markPendingGroupSuggestionsAsRead(15);
   for (const s of justReadGroups) {
     await notifySuggestionStatusChange(client, "g", s, "read");
@@ -594,9 +627,9 @@ async function listGroupSuggestions(reply, repo, client) {
 
   lines.push("Use: /adm aprovar g[id] ou /adm rejeitar g[id]");
   await reply(lines.join("\n"));
-}
+};
 
-async function listGeneralSuggestions(reply, repo, client) {
+const listGeneralSuggestions = async (reply, repo, client) => {
   const justReadGeneral = repo.markPendingGeneralSuggestionsAsRead(15);
   for (const s of justReadGeneral) {
     await notifySuggestionStatusChange(client, "s", s, "read");
@@ -623,9 +656,9 @@ async function listGeneralSuggestions(reply, repo, client) {
 
   lines.push("Use: /adm aprovar s[id] ou /adm rejeitar s[id]");
   await reply(lines.join("\n"));
-}
+};
 
-async function showReadSuggestions(reply, repo) {
+const showReadSuggestions = async (reply, repo) => {
   const groupSuggestions = repo.listPendingGroupSuggestions(20).filter((s) => s.status === "read");
   const generalSuggestions = repo.listPendingGeneralSuggestions(20).filter((s) => s.status === "read");
 
@@ -651,12 +684,12 @@ async function showReadSuggestions(reply, repo) {
   }
 
   await reply(lines.join("\n"));
-}
+};
 
 /**
  * Manipula aprovação em lote (ex: ok g1,g2,g3)
  */
-async function handleApproveBatch(reply, repo, client, ids) {
+const handleSuggestionBatch = async (reply, repo, client, ids, action) => {
   const successIds = [];
   const failedIds = [];
 
@@ -675,159 +708,117 @@ async function handleApproveBatch(reply, repo, client, ids) {
     
     if (type === 'g') {
       suggestion = repo.getGroupSuggestionById(numIdParsed);
-      success = repo.updateGroupSuggestionStatus(numIdParsed, 'approved');
+      success = repo.updateGroupSuggestionStatus(numIdParsed, action);
     } else if (type === 's') {
       suggestion = repo.getGeneralSuggestionById(numIdParsed);
-      success = repo.updateGeneralSuggestionStatus(numIdParsed, 'approved');
+      success = repo.updateGeneralSuggestionStatus(numIdParsed, action);
     }
 
     if (success) {
       successIds.push(id);
       if (suggestion) {
-        await notifySuggestionStatusChange(client, type, suggestion, 'approved');
+        await notifySuggestionStatusChange(client, type, suggestion, action);
       }
     } else {
       failedIds.push(id);
     }
   }
 
-  let message = `✅ Aprovadas (${successIds.length}): ${successIds.join(", ")}\n`;
+  const actionLabel = action === "approved" ? "Aprovadas" : "Rejeitadas";
+  let message = `✅ ${actionLabel} (${successIds.length}): ${successIds.join(", ")}\n`;
   if (failedIds.length > 0) {
     message += `❌ Falhas (${failedIds.length}): ${failedIds.join(", ")}`;
   }
 
   await reply(message.trim());
-}
+};
+
+/**
+ * Manipula aprovação em lote (ex: ok g1,g2,g3)
+ */
+const handleApproveBatch = async (reply, repo, client, ids) => {
+  await handleSuggestionBatch(reply, repo, client, ids, "approved");
+};
 
 /**
  * Manipula rejeição em lote (ex: no s1,s2,s3)
  */
-async function handleRejectBatch(reply, repo, client, ids) {
-  const successIds = [];
-  const failedIds = [];
+const handleRejectBatch = async (reply, repo, client, ids) => {
+  await handleSuggestionBatch(reply, repo, client, ids, "rejected");
+};
 
-  for (const id of ids) {
-    const match = id.match(/^([gs])(\d+)$/);
-    if (!match) {
-      failedIds.push(id);
-      continue;
+const handleWildcardSuggestions = async (reply, repo, client, prefix, action) => {
+  try {
+    const cleanedPrefix = (prefix || "").trim();
+    if (!["g", "s"].includes(cleanedPrefix)) {
+      await reply("❌ Prefixo inválido para wildcard. Use g* ou s*");
+      return;
     }
 
-    const [, type, numId] = match;
-    const numIdParsed = parseInt(numId, 10);
-    
-    let success = false;
-    let suggestion = null;
-    
-    if (type === 'g') {
-      suggestion = repo.getGroupSuggestionById(numIdParsed);
-      success = repo.updateGroupSuggestionStatus(numIdParsed, 'rejected');
-    } else if (type === 's') {
-      suggestion = repo.getGeneralSuggestionById(numIdParsed);
-      success = repo.updateGeneralSuggestionStatus(numIdParsed, 'rejected');
+    const suggestions = cleanedPrefix === "g"
+      ? repo.listPendingGroupSuggestions(200)
+      : repo.listPendingGeneralSuggestions(200);
+
+    const pendingSuggestions = suggestions.filter((s) => s.status === "pending");
+
+    if (pendingSuggestions.length === 0) {
+      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${cleanedPrefix}'`);
+      return;
     }
 
-    if (success) {
-      successIds.push(id);
-      if (suggestion) {
-        await notifySuggestionStatusChange(client, type, suggestion, 'rejected');
-      }
-    } else {
-      failedIds.push(id);
+    const wildcardItems = pendingSuggestions.map((suggestion) => ({
+      id: `${cleanedPrefix}${suggestion.id}`,
+      suggestion,
+    }));
+
+    const result = await processWildcardBatch({
+      pattern: `${cleanedPrefix}*`,
+      items: wildcardItems,
+      handler: async (item) => {
+        const currentSuggestion = item.suggestion;
+        const success =
+          cleanedPrefix === "g"
+            ? repo.updateGroupSuggestionStatus(currentSuggestion.id, action)
+            : repo.updateGeneralSuggestionStatus(currentSuggestion.id, action);
+
+        if (success) {
+          await notifySuggestionStatusChange(client, cleanedPrefix, currentSuggestion, action);
+        }
+
+        return { success };
+      },
+    });
+
+    if (!result.success) {
+      await reply(`❌ ${result.error}`);
+      return;
     }
+
+    const processed = result.matched.filter((item) => item.success).length;
+
+    const actionLabel = action === "approved" ? "aprovadas" : "rejeitadas";
+    await reply(`✅ ${processed}/${pendingSuggestions.length} sugestões ${actionLabel}`);
+  } catch (error) {
+    console.error("[ADMIN] Erro ao processar wildcard:", error);
+    await reply("❌ Erro ao processar wildcards");
   }
-
-  let message = `✅ Rejeitadas (${successIds.length}): ${successIds.join(", ")}\n`;
-  if (failedIds.length > 0) {
-    message += `❌ Falhas (${failedIds.length}): ${failedIds.join(", ")}`;
-  }
-
-  await reply(message.trim());
-}
+};
 
 /**
  * Manipula aprovação com wildcard (ex: ok g* - aprova todos os grupos)
  */
-async function handleApproveWildcard(reply, repo, client, prefix) {
-  try {
-    const suggestions = prefix === 'g'
-      ? repo.listGroupSuggestions()
-      : repo.listGeneralSuggestions();
-
-    const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
-    
-    if (pendingSuggestions.length === 0) {
-      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${prefix}'`);
-      return;
-    }
-
-    let approved = 0;
-    for (const suggestion of pendingSuggestions) {
-      const success =
-        prefix === 'g'
-          ? repo.updateGroupSuggestionStatus(suggestion.id, 'approved')
-          : repo.updateGeneralSuggestionStatus(suggestion.id, 'approved');
-
-      if (success) {
-        approved++;
-        await notifySuggestionStatusChange(
-          client,
-          prefix,
-          suggestion,
-          'approved'
-        );
-      }
-    }
-
-    await reply(`✅ ${approved}/${pendingSuggestions.length} sugestões aprovadas`);
-  } catch (error) {
-    console.error("[ADMIN] Erro ao aprovar wildcard:", error);
-    await reply("❌ Erro ao processar wildcards");
-  }
-}
+const handleApproveWildcard = async (reply, repo, client, prefix) => {
+  await handleWildcardSuggestions(reply, repo, client, prefix, "approved");
+};
 
 /**
  * Manipula rejeição com wildcard (ex: no s* - rejeita todas as sugestões)
  */
-async function handleRejectWildcard(reply, repo, client, prefix) {
-  try {
-    const suggestions = prefix === 'g'
-      ? repo.listGroupSuggestions()
-      : repo.listGeneralSuggestions();
+const handleRejectWildcard = async (reply, repo, client, prefix) => {
+  await handleWildcardSuggestions(reply, repo, client, prefix, "rejected");
+};
 
-    const pendingSuggestions = suggestions.filter(s => s.status === 'pending');
-    
-    if (pendingSuggestions.length === 0) {
-      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${prefix}'`);
-      return;
-    }
-
-    let rejected = 0;
-    for (const suggestion of pendingSuggestions) {
-      const success =
-        prefix === 'g'
-          ? repo.updateGroupSuggestionStatus(suggestion.id, 'rejected')
-          : repo.updateGeneralSuggestionStatus(suggestion.id, 'rejected');
-
-      if (success) {
-        rejected++;
-        await notifySuggestionStatusChange(
-          client,
-          prefix,
-          suggestion,
-          'rejected'
-        );
-      }
-    }
-
-    await reply(`✅ ${rejected}/${pendingSuggestions.length} sugestões rejeitadas`);
-  } catch (error) {
-    console.error("[ADMIN] Erro ao rejeitar wildcard:", error);
-    await reply("❌ Erro ao processar wildcards");
-  }
-}
-
-async function updateSuggestionStatus(reply, repo, client, type, id, status) {
+const updateSuggestionStatus = async (reply, repo, client, type, id, status) => {
   const numId = parseInt(id, 10);
   if (isNaN(numId)) {
     await reply("ID inválido.");
@@ -857,4 +848,71 @@ async function updateSuggestionStatus(reply, repo, client, type, id, status) {
   } else {
     await reply(`❌ Não foi possível atualizar a sugestão ${type}${id}.`);
   }
-}
+};
+
+const handleRecentLogs = async (reply) => {
+  const sections = [];
+  const groupsSection = await buildLogsSection(PATHS.logsGroupsDir, "Grupos", 2, 2);
+  const usersSection = await buildLogsSection(PATHS.logsUsersDir, "Privado", 2, 2);
+
+  if (groupsSection) sections.push(groupsSection);
+  if (usersSection) sections.push(usersSection);
+
+  if (sections.length === 0) {
+    await reply("⚠️ Nenhum log encontrado em data/logs.");
+    return;
+  }
+
+  await reply(["📜 *Últimos logs*", "", ...sections].join("\n"));
+};
+
+const buildLogsSection = async (dirPath, label, maxFiles, maxLinesPerFile) => {
+  try {
+    const files = await readdir(dirPath);
+    const jsonlFiles = files.filter((name) => name.endsWith(".jsonl"));
+
+    if (jsonlFiles.length === 0) {
+      return `*${label}:* sem arquivos de log`;
+    }
+
+    const filesWithMtime = await Promise.all(
+      jsonlFiles.map(async (name) => {
+        const fullPath = path.join(dirPath, name);
+        const content = await readFile(fullPath, "utf8");
+        const lines = content.split("\n").filter(Boolean);
+        const lastLine = lines[lines.length - 1] || "";
+        let timestamp = 0;
+        try {
+          const parsed = JSON.parse(lastLine);
+          timestamp = Date.parse(parsed.timestamp || "") || 0;
+        } catch {
+          timestamp = 0;
+        }
+        return { name, lines, timestamp };
+      })
+    );
+
+    const latestFiles = filesWithMtime
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, maxFiles);
+
+    const sectionLines = [`*${label}:*`];
+    for (const entry of latestFiles) {
+      const tailLines = entry.lines.slice(-maxLinesPerFile);
+      sectionLines.push(`- ${entry.name}`);
+      for (const line of tailLines) {
+        try {
+          const parsed = JSON.parse(line);
+          const text = String(parsed.text || "").replace(/\s+/g, " ").slice(0, 90);
+          sectionLines.push(`  ${parsed.timestamp || "sem-data"} | ${text}`);
+        } catch {
+          sectionLines.push(`  ${line.slice(0, 90)}`);
+        }
+      }
+    }
+
+    return sectionLines.join("\n");
+  } catch {
+    return `*${label}:* indisponível`;
+  }
+};

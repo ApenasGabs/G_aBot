@@ -68,6 +68,8 @@ const ACTION_PREFIXES = {
   "!": "/sugerir",
   ".": "/adm ia ask",
   g: "/sugerirgrupo",
+  seguir: "/seguircupom",
+  parar: "/pararcupom",
 };
 
 /**
@@ -76,9 +78,9 @@ const ACTION_PREFIXES = {
  * @param {string} text - Texto a normalizar
  * @returns {string} Texto normalizado
  */
-export function normalizeText(text) {
+export const normalizeText = (text) => {
   return text.trim().toLowerCase();
-}
+};
 
 /**
  * Extrai o primeiro token de um texto
@@ -86,11 +88,11 @@ export function normalizeText(text) {
  * @param {string} text - Texto a processar
  * @returns {string} Primeiro token
  */
-export function getFirstToken(text) {
-  const trimmed = normalizeText(text);
+export const getFirstToken = (text) => {
+  const trimmed = String(text || "").trim();
   const tokens = trimmed.split(/\s+/);
   return tokens[0] || "";
-}
+};
 
 /**
  * Extrai argumentos após o primeiro token
@@ -98,11 +100,11 @@ export function getFirstToken(text) {
  * @param {string} text - Texto a processar
  * @returns {string} Argumentos restantes
  */
-export function getArguments(text) {
-  const trimmed = normalizeText(text);
+export const getArguments = (text) => {
+  const trimmed = String(text || "").trim();
   const tokens = trimmed.split(/\s+/);
   return tokens.slice(1).join(" ");
-}
+};
 
 /**
  * Verifica se o texto começa com um prefixo de ação
@@ -110,22 +112,28 @@ export function getArguments(text) {
  * @param {string} text - Texto a verificar
  * @returns {string|null} Prefixo encontrado ou null
  */
-export function getActionPrefix(text) {
+export const getActionPrefix = (text) => {
   const trimmed = normalizeText(text);
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("g ")) {
+    return "g";
+  }
+
   const firstChar = trimmed[0];
-  
-  if (ACTION_PREFIXES[firstChar]) {
+
+  if (["+", "-", "?", "!", "."].includes(firstChar)) {
     return firstChar;
   }
-  
+
   // Verifica para "seguir" e "parar" que começam com letra
   const firstWord = trimmed.split(/\s+/)[0];
   if (firstWord === "seguir" || firstWord === "parar") {
     return firstWord;
   }
-  
+
   return null;
-}
+};
 
 /**
  * Parse principal - converte qualquer mensagem em comando estruturado
@@ -140,21 +148,31 @@ export function getActionPrefix(text) {
  * @returns {Object} Objeto estruturado com {command, argsText, type, actionPrefix}
  * @returns {null} Se a mensagem não for um comando válido
  */
-export function parseCommand(text) {
+export const parseCommand = (text) => {
   if (!text || typeof text !== "string") {
     return null;
   }
 
-  const trimmed = normalizeText(text);
-  const firstToken = getFirstToken(trimmed);
-  const argsText = getArguments(trimmed);
+  const rawTrimmed = text.trim();
+  const normalizedTrimmed = normalizeText(text);
+  const firstToken = getFirstToken(normalizedTrimmed);
+  const argsText = getArguments(rawTrimmed);
 
   // Verifica prefixos de ação (+, -, ?, !, ., g, seguir, parar)
-  const actionPrefix = getActionPrefix(trimmed);
+  const actionPrefix = getActionPrefix(normalizedTrimmed);
   if (actionPrefix) {
+    let actionArgs = argsText;
+    if (["+", "-", "?", "!", "."].includes(actionPrefix)) {
+      actionArgs = rawTrimmed.substring(1).trim();
+    } else if (actionPrefix === "g") {
+      actionArgs = rawTrimmed.substring(1).trim();
+    } else if (actionPrefix === "seguir" || actionPrefix === "parar") {
+      actionArgs = getArguments(rawTrimmed);
+    }
+
     return {
       command: ACTION_PREFIXES[actionPrefix] || `/${actionPrefix}`,
-      argsText: trimmed.substring(1).trim(),
+      argsText: actionArgs,
       type: "action",
       actionPrefix,
       isBatchSupported: ["+", "-", "?", "!", "ok", "no"].includes(actionPrefix),
@@ -173,9 +191,9 @@ export function parseCommand(text) {
   }
 
   // Verifica números 1-9
-  if (/^[1-9]$/.test(trimmed)) {
+  if (/^[1-9]$/.test(normalizedTrimmed)) {
     return {
-      command: `menu_${trimmed}`,
+      command: `menu_${normalizedTrimmed}`,
       argsText: "",
       type: "numeric",
     };
@@ -191,8 +209,8 @@ export function parseCommand(text) {
   }
 
   // Verifica comandos com /
-  if (trimmed.startsWith("/")) {
-    const [rawCommand, ...rest] = trimmed.split(/\s+/);
+  if (rawTrimmed.startsWith("/")) {
+    const [rawCommand, ...rest] = rawTrimmed.split(/\s+/);
     return {
       command: rawCommand.toLowerCase(),
       argsText: rest.join(" "),
@@ -202,73 +220,7 @@ export function parseCommand(text) {
 
   // Se nada corresponder, retorna null
   return null;
-}
-
-/**
- * Tenta extrair um comando de admin estruturado
- * Suporta novos formatos: ok [id], no [id], stats, ia, ia reset [nome], etc
- * 
- * @param {string} text - Texto da mensagem
- * @returns {Object|null} Objeto com {command, subcommand, argsText} ou null
- */
-export function parseAdminCommand(text) {
-  if (!text || typeof text !== "string") {
-    return null;
-  }
-
-  const trimmed = normalizeText(text);
-  const tokens = trimmed.split(/\s+/);
-  const firstToken = tokens[0];
-
-  // Novos comandos admin simplificados
-  const adminShorts = {
-    ok: "/adm approve",
-    no: "/adm reject",
-    stats: "/adm stats",
-    ia: "/adm ia",
-    logs: "/adm logs",
-  };
-
-  if (adminShorts[firstToken]) {
-    return {
-      command: adminShorts[firstToken],
-      argsText: tokens.slice(1).join(" "),
-      type: "admin-short",
-      shortUsed: firstToken,
-      isBatchSupported: ["ok", "no"].includes(firstToken),
-    };
-  }
-
-  // Verifica para /adm
-  if (firstToken === "/adm" || firstToken === "adm") {
-    const restTokens = tokens.slice(1);
-    const subcommand = restTokens[0] || "";
-    const remaining = restTokens.slice(1).join(" ");
-
-    return {
-      command: "/adm",
-      subcommand,
-      argsText: remaining,
-      type: "admin-full",
-    };
-  }
-
-  return null;
-}
-
-/**
- * Valida se um comando é legítimo
- * 
- * @param {Object} parsed - Resultado do parseCommand
- * @returns {boolean} True se válido
- */
-export function isValidCommand(parsed) {
-  if (!parsed) return false;
-  if (!parsed.command) return false;
-  if (typeof parsed.command !== "string") return false;
-  
-  return true;
-}
+};
 
 /**
  * Extrai emojis de reação baseado no tipo de comando
@@ -277,7 +229,7 @@ export function isValidCommand(parsed) {
  * @param {string} actionPrefix - Prefixo da ação (+, -, ?, !, .)
  * @returns {string} Emoji apropriado
  */
-export function getReactionEmoji(actionPrefix) {
+export const getReactionEmoji = (actionPrefix) => {
   const reactions = {
     "+": "✅",
     "-": "✅",
@@ -290,4 +242,4 @@ export function getReactionEmoji(actionPrefix) {
   };
 
   return reactions[actionPrefix] || "⏳";
-}
+};
