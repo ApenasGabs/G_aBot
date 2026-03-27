@@ -18,6 +18,7 @@ Olá! Use os atalhos rápidos:
 
 🔍 *FILTROS*
 ↳ \`+ termo\` : Adicionar (ex: + tv, pc)
+↳ \`+ termo ate 3500\` : Alertar ate valor maximo
 ↳ \`- termo\` : Remover filtro
 ↳ \`filtros\` : Meus filtros ativos
 
@@ -48,6 +49,7 @@ export function getHelpMenu() {
 
 🛠️ *FILTROS (Lote suportado)*
 • \`+ item1, item2\` : Adiciona vários
+• \`+ item ate 3500\` : Adiciona com preco maximo
 • \`- item1\` : Remove um filtro
 • \`list\` ou \`filtros\` : Lista o que você segue
 
@@ -113,6 +115,7 @@ export function getFiltersMenu() {
 ━━━━━━━━━━━━━━━
 Use os comandos:
 • \`+ termo\` : Adicionar filtro
+• \`+ termo ate 3500\` : Adicionar com limite de preco
 • \`- termo\` : Remover filtro
 • \`list\` : Ver seus filtros
 

@@ -56,6 +56,89 @@ const suggestionStatusLabel = (status) => {
   return statusMap[status] || status || "desconhecido";
 };
 
+const formatCurrencyBRL = (cents) => {
+  if (!Number.isFinite(cents) || cents <= 0) return "R$ 0,00";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(cents / 100);
+};
+
+const parsePriceToCents = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+
+  const normalized = value
+    .replace(/\s+/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.round(parsed * 100);
+};
+
+const parseFilterInput = (rawItem) => {
+  const item = String(rawItem || "").trim();
+  if (!item) {
+    return { ok: false, error: "Item vazio" };
+  }
+
+  const withLimit = item.match(/^(.*?)(?:\s*(?:<=|ate|até|max|no maximo)\s*)r?\$?\s*([0-9][0-9.,]*)\s*$/i);
+  if (!withLimit) {
+    return { ok: true, term: item, maxPriceCents: null };
+  }
+
+  const term = String(withLimit[1] || "").trim();
+  const maxPriceCents = parsePriceToCents(withLimit[2]);
+
+  if (!term) {
+    return { ok: false, error: "Termo do filtro ausente" };
+  }
+
+  if (!maxPriceCents) {
+    return { ok: false, error: "Valor maximo invalido" };
+  }
+
+  return { ok: true, term, maxPriceCents };
+};
+
+const formatFilterLabel = (term, maxPriceCents) => {
+  if (!Number.isFinite(maxPriceCents) || maxPriceCents <= 0) {
+    return term;
+  }
+  return `${term} (ate ${formatCurrencyBRL(maxPriceCents)})`;
+};
+
+const RECENCY_LEGEND_LINES = [
+  "",
+  "Legenda de recencia:",
+  "🔥🔥🔥 < 5min | 🔥🔥 < 15min | 🔥 < 30min",
+  "⏰ < 2h | 🕐 < 6h | 📅 < 24h | 🧊 >= 24h",
+];
+
+const buildUniqueCouponLines = (coupons, calculateRecencyEmoji, detectStoreFromText) => {
+  const seenCodes = new Set();
+  const lines = [];
+
+  for (const coupon of coupons) {
+    const rawCode = String(coupon.code || "").trim();
+    if (!rawCode) continue;
+
+    const normalizedCode = rawCode.toUpperCase();
+    if (seenCodes.has(normalizedCode)) continue;
+
+    const store = detectStoreFromText(coupon.message_text || "", coupon.group_name || "");
+    if (store === "Loja nao identificada") continue;
+
+    const emoji = calculateRecencyEmoji(Number(coupon.last_seen_timestamp));
+    lines.push(`${emoji} ${normalizedCode} | ${store}`);
+    seenCodes.add(normalizedCode);
+  }
+
+  return lines;
+};
+
 /**
  * Manipulador de comando /add com suporte a lote
  * 
@@ -77,41 +160,61 @@ const handleAddCommand = async ({ chatId, name, argsText, repo, reply }) => {
   }
 
   const items = splitByComma(argsText);
-  const result = await processBatch({
-    text: argsText,
-    action: "add",
-    handler: async ({ item }) => ({
-      success: repo.addKeyword(chatId, item),
-    }),
-  });
+  const processed = [];
+  const invalid = [];
 
-  if (!result.success) {
-    await reply(`❌ ${result.error}`);
-    return;
+  for (const item of items) {
+    const parsed = parseFilterInput(item);
+    if (!parsed.ok) {
+      invalid.push({ item, error: parsed.error });
+      continue;
+    }
+
+    const saveResult = repo.addKeyword(chatId, parsed.term, parsed.maxPriceCents);
+    const label = formatFilterLabel(parsed.term, parsed.maxPriceCents);
+    processed.push({
+      item,
+      label,
+      status: saveResult.status,
+    });
   }
 
   if (items.length === 1) {
-    const [single] = result.processed;
-    await reply(
-      single?.success
-        ? templates.getFilterAddedMessage(items[0])
-        : templates.getFilterDuplicateError(items[0])
-    );
+    if (invalid.length > 0) {
+      await reply("❌ Formato inválido. Use: + notebook ate 3500  ou  + notebook <= 3500");
+      return;
+    }
+
+    const single = processed[0];
+    if (single.status === "added") {
+      await reply(`✅ Filtro adicionado: ${single.label}`);
+      return;
+    }
+    if (single.status === "updated") {
+      await reply(`✅ Filtro atualizado: ${single.label}`);
+      return;
+    }
+
+    await reply(`⚠️ Esse filtro ja existe: ${single.label}`);
     return;
   }
 
-  const successful = result.processed.filter((entry) => entry.success).map((entry) => entry.item);
-  const duplicates = result.processed.filter((entry) => !entry.success).map((entry) => entry.item);
+  const added = processed.filter((entry) => entry.status === "added").map((entry) => entry.label);
+  const updated = processed.filter((entry) => entry.status === "updated").map((entry) => entry.label);
+  const duplicates = processed.filter((entry) => entry.status === "duplicate").map((entry) => entry.label);
 
-  let message = "";
-  if (successful.length > 0) {
-    message += templates.getFilterAddedMessage(successful) + "\n";
-  }
-  if (duplicates.length > 0) {
-    message += `⚠️ Ja existiam (${duplicates.length}): ${duplicates.join(", ")}`;
+  const lines = [];
+  if (added.length > 0) lines.push(`✅ Adicionados (${added.length}): ${added.join(", ")}`);
+  if (updated.length > 0) lines.push(`🔁 Atualizados (${updated.length}): ${updated.join(", ")}`);
+  if (duplicates.length > 0) lines.push(`⚠️ Sem alteração (${duplicates.length}): ${duplicates.join(", ")}`);
+  if (invalid.length > 0) {
+    lines.push(
+      `❌ Invalidos (${invalid.length}): ${invalid.map((entry) => entry.item).join(", ")}`
+    );
+    lines.push("Formato de preço: termo ate 3500  ou  termo <= 3500");
   }
 
-  await reply(message.trim());
+  await reply(lines.join("\n"));
 };
 
 /**
@@ -484,13 +587,25 @@ export const handlePrivateCommand = async ({
       return;
     }
 
+    const parsed = parseFilterInput(argsText);
+    if (!parsed.ok) {
+      await reply("Formato inválido. Use: /add notebook ate 3500  ou  /add notebook <= 3500");
+      return;
+    }
+
     repo.upsertUser(chatId, name);
-    const inserted = repo.addKeyword(chatId, argsText);
-    await reply(
-      inserted
-        ? `Filtro adicionado: ${argsText}`
-        : `Esse filtro ja existe: ${argsText}`
-    );
+    const result = repo.addKeyword(chatId, parsed.term, parsed.maxPriceCents);
+    const label = formatFilterLabel(parsed.term, parsed.maxPriceCents);
+    if (result.status === "added") {
+      await reply(`Filtro adicionado: ${label}`);
+      return;
+    }
+    if (result.status === "updated") {
+      await reply(`Filtro atualizado: ${label}`);
+      return;
+    }
+
+    await reply(`Esse filtro ja existe: ${label}`);
     return;
   }
 
@@ -520,7 +635,7 @@ export const handlePrivateCommand = async ({
       return;
     }
 
-    const lines = keywords.map(({ term }) => `- ${term}`);
+    const lines = keywords.map(({ term, max_price_cents }) => `- ${formatFilterLabel(term, max_price_cents)}`);
     await reply(`Seus filtros:\n${lines.join("\n")}`);
     return;
   }
@@ -616,23 +731,18 @@ export const handlePrivateCommand = async ({
       calculateRecencyEmoji,
       detectStoreFromText,
     } = await import("../services/couponExtractor.js");
-    const lines = recentCoupons
-      .map((c) => {
-      const emoji = calculateRecencyEmoji(Number(c.last_seen_timestamp));
-      const store = detectStoreFromText(c.message_text || "", c.group_name || "");
-      if (store === "Loja nao identificada") {
-        return null;
-      }
-      return `${emoji} ${c.code} | ${store}`;
-      })
-      .filter(Boolean);
+    const lines = buildUniqueCouponLines(
+      recentCoupons,
+      calculateRecencyEmoji,
+      detectStoreFromText
+    );
 
     if (lines.length === 0) {
       await reply("Nenhum cupom com loja identificada no momento.");
       return;
     }
 
-    await reply(`Cupons recentes:\n\n${lines.join("\n")}`);
+    await reply(`Cupons recentes:\n\n${lines.join("\n")}${RECENCY_LEGEND_LINES.join("\n")}`);
     return;
   }
 
@@ -652,23 +762,18 @@ export const handlePrivateCommand = async ({
       calculateRecencyEmoji,
       detectStoreFromText,
     } = await import("../services/couponExtractor.js");
-    const lines = results
-      .map((c) => {
-      const emoji = calculateRecencyEmoji(Number(c.last_seen_timestamp));
-      const store = detectStoreFromText(c.message_text || "", c.group_name || "");
-      if (store === "Loja nao identificada") {
-        return null;
-      }
-      return `${emoji} ${c.code} | ${store}`;
-      })
-      .filter(Boolean);
+    const lines = buildUniqueCouponLines(
+      results,
+      calculateRecencyEmoji,
+      detectStoreFromText
+    );
 
     if (lines.length === 0) {
       await reply(`Nao encontrei cupons com loja identificada para "${argsText}".`);
       return;
     }
 
-    await reply(`Cupons para "${argsText}":\n\n${lines.join("\n")}`);
+    await reply(`Cupons para "${argsText}":\n\n${lines.join("\n")}${RECENCY_LEGEND_LINES.join("\n")}`);
     return;
   }
 

@@ -1,7 +1,7 @@
 import makeWASocket, {
-    DisconnectReason,
-    fetchLatestBaileysVersion,
-    useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
@@ -9,15 +9,23 @@ import { detectStoreFromText, extractCoupons } from "../services/couponExtractor
 import { logGroupMessage, logUserMessage } from "../services/messageLogger.js";
 import { createDispatchQueue } from "../utils/queue.js";
 import {
-    createOfferHash,
-    detectMessageType,
-    extractMessageText,
-    normalizeText,
+  createOfferHash,
+  detectMessageType,
+  extractMessageText,
+  normalizeText,
 } from "../utils/text.js";
 import { handlePrivateCommand } from "./commands.js";
 import { buildCouponAlertMessage } from "./couponAlertMessage.js";
 import { findMatches } from "./matching.js";
 import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
+
+const formatCurrencyBRL = (cents) => {
+  if (!Number.isFinite(cents) || cents <= 0) return "R$ 0,00";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(cents / 100);
+};
 
 export async function initWhatsappBot({
   repo,
@@ -127,6 +135,7 @@ export async function initWhatsappBot({
         const isGroup = chatId.endsWith("@g.us");
         const isBroadcast = chatId.endsWith("@broadcast");
         const isNewsletter = chatId.endsWith("@newsletter");
+        const isMonitoredChannel = isGroup || isNewsletter;
         const isPrivate = !isGroup && !isBroadcast && !isNewsletter;
 
         const text = extractMessageText(msg.message).trim();
@@ -229,7 +238,7 @@ export async function initWhatsappBot({
             continue;
           }
 
-          if (!isGroup) continue;
+          if (!isMonitoredChannel) continue;
 
           const senderName = msg.pushName || "Desconhecido";
           const authorId = msg.key.participant || chatId;
@@ -237,8 +246,12 @@ export async function initWhatsappBot({
           let groupName = groupNameCache.get(chatId) ?? chatId;
           if (!groupNameCache.has(chatId)) {
             try {
-              const groupMeta = await client.groupMetadata(chatId);
-              groupName = groupMeta.subject || chatId;
+              if (isGroup) {
+                const groupMeta = await client.groupMetadata(chatId);
+                groupName = groupMeta.subject || chatId;
+              } else {
+                groupName = msg.pushName || chatId;
+              }
               groupNameCache.set(chatId, groupName);
             } catch {
               groupName = chatId;
@@ -387,19 +400,27 @@ export async function initWhatsappBot({
           if (!isNewOffer) continue;
 
           const allKeywords = repo.listAllKeywords();
-          const matches = findMatches(normalizedOfferText, allKeywords);
+          const matches = findMatches(normalizedOfferText, allKeywords, text);
           if (matches.size === 0) continue;
 
           for (const [userId, terms] of matches.entries()) {
-            const uniqueTerms = [...new Set(terms)];
+            const uniqueTerms = [...new Set(terms.map((entry) => {
+              if (Number.isFinite(entry.maxPriceCents) && entry.maxPriceCents > 0) {
+                return `${entry.term} (<= ${formatCurrencyBRL(entry.maxPriceCents)})`;
+              }
+              return entry.term;
+            }))];
+
+            const offerPriceCents = terms.find((entry) => Number.isFinite(entry.offerPriceCents))?.offerPriceCents;
             const alertText = [
               "Oferta encontrada!",
               `Filtros: ${uniqueTerms.join(", ")}`,
+              offerPriceCents ? `Preco detectado: ${formatCurrencyBRL(offerPriceCents)}` : null,
               `De: ${senderName}`,
               `Grupo: ${groupName}`,
               "",
               text,
-            ].join("\n");
+            ].filter(Boolean).join("\n");
 
             dispatchQueue.enqueue({
               chatId: userId,

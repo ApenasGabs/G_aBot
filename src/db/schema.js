@@ -12,6 +12,7 @@ export function setupDatabase(db) {
       user_id TEXT,
       term TEXT NOT NULL,
       term_normalized TEXT NOT NULL,
+      max_price_cents INTEGER,
       FOREIGN KEY (user_id) REFERENCES users(chat_id)
     );
 
@@ -93,5 +94,11 @@ export function setupDatabase(db) {
   const hasAlertMode = userColumns.some((column) => column.name === "alert_mode");
   if (!hasAlertMode) {
     db.exec("ALTER TABLE users ADD COLUMN alert_mode TEXT NOT NULL DEFAULT 'full';");
+  }
+
+  const keywordColumns = db.prepare("PRAGMA table_info(keywords)").all();
+  const hasMaxPriceCents = keywordColumns.some((column) => column.name === "max_price_cents");
+  if (!hasMaxPriceCents) {
+    db.exec("ALTER TABLE keywords ADD COLUMN max_price_cents INTEGER;");
   }
 }

@@ -34,10 +34,23 @@ export function createRepo(db) {
     WHERE chat_id = ?
   `);
 
-  const addKeywordStmt = db.prepare(`
-    INSERT INTO keywords (user_id, term, term_normalized)
-    VALUES (?, ?, ?)
-    ON CONFLICT(user_id, term_normalized) DO NOTHING
+                                                                                                                                                                                                                                                                                                                                    const insertKeywordStmt = db.prepare(`
+    INSERT INTO keywords (user_id, term, term_normalized, max_price_cents)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const findKeywordByUserAndNormalizedStmt = db.prepare(`
+    SELECT id, term, max_price_cents
+    FROM keywords
+    WHERE user_id = ? AND term_normalized = ?
+    LIMIT 1
+  `);
+
+  const updateKeywordStmt = db.prepare(`
+    UPDATE keywords
+    SET term = ?,
+        max_price_cents = ?
+    WHERE id = ?
   `);
 
   const removeKeywordStmt = db.prepare(`
@@ -46,13 +59,13 @@ export function createRepo(db) {
   `);
 
   const listKeywordsStmt = db.prepare(`
-    SELECT term FROM keywords
+    SELECT term, max_price_cents FROM keywords
     WHERE user_id = ?
     ORDER BY term COLLATE NOCASE
   `);
 
   const listAllKeywordsStmt = db.prepare(`
-    SELECT k.user_id, k.term, k.term_normalized
+    SELECT k.user_id, k.term, k.term_normalized, k.max_price_cents
     FROM keywords k
     INNER JOIN users u ON u.chat_id = k.user_id
     WHERE u.is_active = 1
@@ -445,10 +458,33 @@ export function createRepo(db) {
         mode: normalizedMode,
       };
     },
-    addKeyword(chatId, term) {
-      const normalized = normalizeText(term);
-      const result = addKeywordStmt.run(chatId, term.trim(), normalized);
-      return result.changes > 0;
+    addKeyword(chatId, term, maxPriceCents = null) {
+      const cleanTerm = String(term || "").trim();
+      const normalized = normalizeText(cleanTerm);
+      if (!normalized) {
+        return { status: "invalid" };
+      }
+
+      const normalizedMaxPrice = Number.isFinite(maxPriceCents)
+        ? Math.max(1, Math.floor(maxPriceCents))
+        : null;
+
+      const existing = findKeywordByUserAndNormalizedStmt.get(chatId, normalized);
+      if (!existing) {
+        insertKeywordStmt.run(chatId, cleanTerm, normalized, normalizedMaxPrice);
+        return { status: "added" };
+      }
+
+      const existingPrice = Number.isFinite(existing.max_price_cents)
+        ? Number(existing.max_price_cents)
+        : null;
+
+      if (existing.term === cleanTerm && existingPrice === normalizedMaxPrice) {
+        return { status: "duplicate" };
+      }
+
+      updateKeywordStmt.run(cleanTerm, normalizedMaxPrice, existing.id);
+      return { status: "updated" };
     },
     removeKeyword(chatId, term) {
       const result = removeKeywordStmt.run(chatId, normalizeText(term));

@@ -4,6 +4,7 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { BOT_CONFIG, PATHS } from "../config.js";
 import {
@@ -642,12 +643,110 @@ const formatOllamaStatus = (status) => {
   return lines.join("\n");
 };
 
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+};
+
+const readCpuSnapshot = async () => {
+  try {
+    const stat = await readFile("/proc/stat", "utf8");
+    const cpuLine = stat.split("\n").find((line) => line.startsWith("cpu "));
+    if (!cpuLine) return null;
+
+    const parts = cpuLine
+      .trim()
+      .split(/\s+/)
+      .slice(1)
+      .map((v) => Number(v));
+
+    if (parts.some((v) => Number.isNaN(v))) return null;
+
+    const idle = (parts[3] || 0) + (parts[4] || 0);
+    const total = parts.reduce((acc, cur) => acc + cur, 0);
+    return { idle, total };
+  } catch {
+    return null;
+  }
+};
+
+const readCpuUsagePercent = async (sampleMs = 250) => {
+  const first = await readCpuSnapshot();
+  if (!first) return null;
+
+  await new Promise((resolve) => setTimeout(resolve, sampleMs));
+
+  const second = await readCpuSnapshot();
+  if (!second) return null;
+
+  const totalDelta = second.total - first.total;
+  const idleDelta = second.idle - first.idle;
+
+  if (totalDelta <= 0) return null;
+  const usage = (1 - idleDelta / totalDelta) * 100;
+  if (!Number.isFinite(usage)) return null;
+  return Math.max(0, Math.min(100, usage));
+};
+
+const readSystemTemperatureC = async () => {
+  try {
+    const entries = await readdir("/sys/class/thermal");
+    const zones = entries.filter((name) => name.startsWith("thermal_zone"));
+    if (zones.length === 0) return null;
+
+    const values = [];
+    for (const zone of zones) {
+      try {
+        const raw = await readFile(path.join("/sys/class/thermal", zone, "temp"), "utf8");
+        const parsed = Number(String(raw).trim());
+        if (!Number.isFinite(parsed) || parsed <= 0) continue;
+
+        const celsius = parsed > 200 ? parsed / 1000 : parsed;
+        if (celsius < 0 || celsius > 150) continue;
+        values.push(celsius);
+      } catch {
+        // Ignora zonas sem permissão ou sem valor legível.
+      }
+    }
+
+    if (values.length === 0) return null;
+    const avg = values.reduce((acc, cur) => acc + cur, 0) / values.length;
+    return avg;
+  } catch {
+    return null;
+  }
+};
+
 const showBotStatus = async (reply, repo) => {
   const uptime = process.uptime();
   const uptimeMinutes = Math.floor(uptime / 60);
   const uptimeSeconds = Math.floor(uptime % 60);
   const memoryUsage = process.memoryUsage();
-  const memoryMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+  const processHeapMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const ramUsagePercent = totalMem > 0 ? (usedMem / totalMem) * 100 : 0;
+
+  const cpus = os.cpus() || [];
+  const cpuModel = cpus[0]?.model || "desconhecido";
+  const cpuCores = cpus.length || 0;
+  const loadAvg = os.loadavg();
+  const cpuUsage = await readCpuUsagePercent();
+  const temperatureC = await readSystemTemperatureC();
+
+  const systemUptimeSec = os.uptime();
+  const sysDays = Math.floor(systemUptimeSec / 86400);
+  const sysHours = Math.floor((systemUptimeSec % 86400) / 3600);
+  const sysMinutes = Math.floor((systemUptimeSec % 3600) / 60);
   
   const timestamp = new Date().toLocaleString('pt-BR', { 
     timeZone: 'America/Sao_Paulo' 
@@ -682,7 +781,17 @@ const showBotStatus = async (reply, repo) => {
       "",
       `Horário: ${timestamp}`,
       `Uptime: ${uptimeMinutes}m ${uptimeSeconds}s`,
-      `Memória: ${memoryMB} MB`,
+      `Memória do bot (heap): ${processHeapMB} MB`,
+      "",
+      "🖥️ *Host*",
+      `Sistema: ${os.type()} ${os.release()} (${os.arch()})`,
+      `Uptime do host: ${sysDays}d ${sysHours}h ${sysMinutes}m`,
+      `CPU: ${cpuModel} (${cpuCores} cores)`,
+      `Uso de CPU: ${cpuUsage == null ? "indisponível" : `${cpuUsage.toFixed(1)}%`}`,
+      `Carga (1/5/15m): ${loadAvg.map((v) => v.toFixed(2)).join(" / ")}`,
+      `RAM: ${formatBytes(usedMem)} / ${formatBytes(totalMem)} (${ramUsagePercent.toFixed(1)}%)`,
+      `Temperatura: ${temperatureC == null ? "indisponível" : `${temperatureC.toFixed(1)}°C`}`,
+      "",
       `Versão: gabot-ofertas v0.0.1`,
       `Node.js: ${process.version}`,
       ...metricsLines,
