@@ -22,3 +22,10 @@ test("atalho alerta preserva argumento informado", () => {
   assert.equal(parsed.argsText, "compacto");
   assert.equal(parsed.type, "shortcut");
 });
+
+test("atalho limpar vira comando de limpar filtros", () => {
+  const parsed = parseCommand("limpar");
+  assert.equal(parsed.command, "/limparfiltros");
+  assert.equal(parsed.argsText, "");
+  assert.equal(parsed.type, "shortcut");
+});

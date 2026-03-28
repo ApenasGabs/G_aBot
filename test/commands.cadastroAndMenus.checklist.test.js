@@ -59,6 +59,7 @@ test("menu principal reforca comandos de cupom por loja", () => {
   assert.match(menu, /seguir loja/i);
   assert.match(menu, /lojas/i);
   assert.match(menu, /compacto/i);
+  assert.match(menu, /limpar/i);
 });
 
 test("menu de ajuda reforca alerta compacto e detalhado", () => {
@@ -68,6 +69,7 @@ test("menu de ajuda reforca alerta compacto e detalhado", () => {
   assert.match(help, /alerta detalhado/i);
   assert.match(help, /seguir \[loja\]/i);
   assert.match(help, /parar \[loja\]/i);
+  assert.match(help, /limparfiltros/i);
 });
 
 test("menu de cupons mostra atalhos de modo de alerta", () => {

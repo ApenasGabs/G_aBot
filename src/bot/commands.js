@@ -624,6 +624,17 @@ export const handlePrivateCommand = async ({
     return;
   }
 
+  if (command === "/limparfiltros" || command === "/removertodos") {
+    const removedCount = repo.removeAllKeywords(chatId);
+    if (!removedCount) {
+      await reply("Voce nao tem filtros cadastrados para remover.");
+      return;
+    }
+
+    await reply(`✅ Removi todos os seus filtros (${removedCount}).`);
+    return;
+  }
+
   if (
     command === "/meusfiltros" ||
     command === "/filtros" ||

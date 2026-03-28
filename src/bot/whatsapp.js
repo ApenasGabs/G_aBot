@@ -5,7 +5,10 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
-import { detectStoreFromText, extractCoupons } from "../services/couponExtractor.js";
+import {
+  detectStoreFromText,
+  extractCoupons,
+} from "../services/couponExtractor.js";
 import { logGroupMessage, logUserMessage } from "../services/messageLogger.js";
 import { createDispatchQueue } from "../utils/queue.js";
 import {
@@ -78,19 +81,22 @@ export async function initWhatsappBot({
       if (connection === "open") {
         ready = true;
         console.log("WhatsApp conectado. Bot em execucao.");
-        
+
         // Notifica grupo admin que o bot iniciou
         if (BOT_CONFIG.adminGroupId) {
           setTimeout(async () => {
             try {
-              const timestamp = new Date().toLocaleString('pt-BR', { 
-                timeZone: 'America/Sao_Paulo' 
+              const timestamp = new Date().toLocaleString("pt-BR", {
+                timeZone: "America/Sao_Paulo",
               });
               await client.sendMessage(BOT_CONFIG.adminGroupId, {
-                text: `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.0.1`
+                text: `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.0.1`,
               });
             } catch (error) {
-              console.log("Erro ao enviar notificação de inicialização:", error.message);
+              console.log(
+                "Erro ao enviar notificação de inicialização:",
+                error.message,
+              );
             }
           }, 3000); // Aguarda 3s para garantir que está pronto
         }
@@ -105,14 +111,17 @@ export async function initWhatsappBot({
         // Notifica grupo admin sobre desconexão
         if (BOT_CONFIG.adminGroupId && !shouldReconnect) {
           try {
-            const timestamp = new Date().toLocaleString('pt-BR', { 
-              timeZone: 'America/Sao_Paulo' 
+            const timestamp = new Date().toLocaleString("pt-BR", {
+              timeZone: "America/Sao_Paulo",
             });
             await client.sendMessage(BOT_CONFIG.adminGroupId, {
-              text: `⚠️ Bot desconectado (logout)\nHorário: ${timestamp}`
+              text: `⚠️ Bot desconectado (logout)\nHorário: ${timestamp}`,
             });
           } catch (error) {
-            console.log("Erro ao enviar notificação de desconexão:", error.message);
+            console.log(
+              "Erro ao enviar notificação de desconexão:",
+              error.message,
+            );
           }
         }
 
@@ -187,13 +196,13 @@ export async function initWhatsappBot({
             }) => {
               if (!BOT_CONFIG.adminGroupId) {
                 console.log(
-                  "BOT_ADMIN_GROUP_ID nao configurado. Sugestao salva sem notificacao ao admin."
+                  "BOT_ADMIN_GROUP_ID nao configurado. Sugestao salva sem notificacao ao admin.",
                 );
                 return;
               }
 
               let message;
-              if (suggestionType === 'general') {
+              if (suggestionType === "general") {
                 message = [
                   "💡 Nova sugestao geral",
                   `ID: s${suggestionId}`,
@@ -217,7 +226,9 @@ export async function initWhatsappBot({
                 ].join("\n");
               }
 
-              await client.sendMessage(BOT_CONFIG.adminGroupId, { text: message });
+              await client.sendMessage(BOT_CONFIG.adminGroupId, {
+                text: message,
+              });
             };
 
             await handlePrivateCommand({
@@ -231,7 +242,8 @@ export async function initWhatsappBot({
               notifyAdminSuggestion,
               handleUnmappedPrivateMessage,
               handleAdminCommand: async (payload) => {
-                const { handleAdminCommand } = await import("./adminCommands.js");
+                const { handleAdminCommand } =
+                  await import("./adminCommands.js");
                 return handleAdminCommand(payload);
               },
             });
@@ -271,10 +283,14 @@ export async function initWhatsappBot({
           if (BOT_CONFIG.adminGroupId && chatId === BOT_CONFIG.adminGroupId) {
             const textLower = text.toLowerCase().trim();
             console.log(`[ADMIN DEBUG] Mensagem no grupo admin: "${text}"`);
-            console.log(`[ADMIN DEBUG] Admin Group ID configurado: ${BOT_CONFIG.adminGroupId}`);
+            console.log(
+              `[ADMIN DEBUG] Admin Group ID configurado: ${BOT_CONFIG.adminGroupId}`,
+            );
             console.log(`[ADMIN DEBUG] Chat ID atual: ${chatId}`);
-            console.log(`[ADMIN DEBUG] IDs são iguais: ${chatId === BOT_CONFIG.adminGroupId}`);
-            
+            console.log(
+              `[ADMIN DEBUG] IDs são iguais: ${chatId === BOT_CONFIG.adminGroupId}`,
+            );
+
             const isAdminCommand =
               textLower.startsWith("/adm") ||
               textLower.startsWith("/admin") ||
@@ -289,10 +305,13 @@ export async function initWhatsappBot({
               textLower === "terminal" ||
               textLower.startsWith("terminal ") ||
               textLower === "logs" ||
+              textLower === "gruposbot" ||
               textLower.startsWith(".");
 
             if (isAdminCommand) {
-              console.log(`[ADMIN DEBUG] Comando admin detectado: "${textLower}"`);
+              console.log(
+                `[ADMIN DEBUG] Comando admin detectado: "${textLower}"`,
+              );
               const { handleAdminCommand } = await import("./adminCommands.js");
               await handleAdminCommand({
                 client,
@@ -306,7 +325,9 @@ export async function initWhatsappBot({
               console.log(`[ADMIN DEBUG] Mensagem não é comando admin`);
             }
           } else if (BOT_CONFIG.adminGroupId) {
-            console.log(`[ADMIN DEBUG] Mensagem em grupo diferente do admin (${chatId} !== ${BOT_CONFIG.adminGroupId})`);
+            console.log(
+              `[ADMIN DEBUG] Mensagem em grupo diferente do admin (${chatId} !== ${BOT_CONFIG.adminGroupId})`,
+            );
           } else {
             console.log(`[ADMIN DEBUG] BOT_ADMIN_GROUP_ID não configurado`);
           }
@@ -324,16 +345,18 @@ export async function initWhatsappBot({
           } = extractionResult;
 
           const detectedStore = detectStoreFromText(text, groupName, aiStore);
-          
+
           if (coupons.length > 0) {
-            console.log(`[Cupom] Método de extração: ${source}${aiStore ? ` | Loja (IA): ${aiStore}` : ''}`);
+            console.log(
+              `[Cupom] Método de extração: ${source}${aiStore ? ` | Loja (IA): ${aiStore}` : ""}`,
+            );
             if (summaryWithAI) {
               console.log(`[Cupom] ${summaryWithAI}`);
             }
             if (summaryWithoutAI) {
               console.log(`[Cupom] ${summaryWithoutAI}`);
             }
-            
+
             const allCouponInterests = repo.listAllCouponInterests();
             const contextNormalized = normalizeText(`${groupName} ${text}`);
             const normalizedDetectedStore = normalizeText(detectedStore);
@@ -355,7 +378,9 @@ export async function initWhatsappBot({
               repo.incrementCouponStoreMetric(detectedStore, "detected", 1);
 
               const interestedUsers = allCouponInterests.filter((interest) => {
-                const byContext = contextNormalized.includes(interest.store_normalized);
+                const byContext = contextNormalized.includes(
+                  interest.store_normalized,
+                );
                 const byDetectedStore =
                   normalizedDetectedStore !== "loja nao identificada" &&
                   interest.store_normalized === normalizedDetectedStore;
@@ -386,7 +411,7 @@ export async function initWhatsappBot({
             console.log(
               `Cupons detectados em ${groupName}: ${coupons
                 .map((c) => `${c.code}(${c.confidence}%)`)
-                .join(", ")} ${isExhausted ? "(esgotado)" : ""}`
+                .join(", ")} ${isExhausted ? "(esgotado)" : ""}`,
             );
           } else if (telemetry?.isFalsePositive) {
             repo.incrementCouponStoreMetric(detectedStore, "false_positive", 1);
@@ -404,23 +429,36 @@ export async function initWhatsappBot({
           if (matches.size === 0) continue;
 
           for (const [userId, terms] of matches.entries()) {
-            const uniqueTerms = [...new Set(terms.map((entry) => {
-              if (Number.isFinite(entry.maxPriceCents) && entry.maxPriceCents > 0) {
-                return `${entry.term} (<= ${formatCurrencyBRL(entry.maxPriceCents)})`;
-              }
-              return entry.term;
-            }))];
+            const uniqueTerms = [
+              ...new Set(
+                terms.map((entry) => {
+                  if (
+                    Number.isFinite(entry.maxPriceCents) &&
+                    entry.maxPriceCents > 0
+                  ) {
+                    return `${entry.term} (<= ${formatCurrencyBRL(entry.maxPriceCents)})`;
+                  }
+                  return entry.term;
+                }),
+              ),
+            ];
 
-            const offerPriceCents = terms.find((entry) => Number.isFinite(entry.offerPriceCents))?.offerPriceCents;
+            const offerPriceCents = terms.find((entry) =>
+              Number.isFinite(entry.offerPriceCents),
+            )?.offerPriceCents;
             const alertText = [
               "Oferta encontrada!",
               `Filtros: ${uniqueTerms.join(", ")}`,
-              offerPriceCents ? `Preco detectado: ${formatCurrencyBRL(offerPriceCents)}` : null,
+              offerPriceCents
+                ? `Preco detectado: ${formatCurrencyBRL(offerPriceCents)}`
+                : null,
               `De: ${senderName}`,
               `Grupo: ${groupName}`,
               "",
               text,
-            ].filter(Boolean).join("\n");
+            ]
+              .filter(Boolean)
+              .join("\n");
 
             dispatchQueue.enqueue({
               chatId: userId,
@@ -436,7 +474,7 @@ export async function initWhatsappBot({
   };
 
   connect();
-  
+
   // Retorna o cliente para uso externo (notificações de shutdown, etc)
   return new Promise((resolve) => {
     const checkReady = setInterval(() => {
@@ -445,7 +483,7 @@ export async function initWhatsappBot({
         resolve(client);
       }
     }, 100);
-    
+
     // Timeout de 30s, retorna mesmo se não estiver pronto
     setTimeout(() => {
       clearInterval(checkReady);

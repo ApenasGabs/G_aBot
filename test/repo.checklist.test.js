@@ -108,3 +108,17 @@ test("repo limpa processed_offers por TTL", () => {
 
   db.close();
 });
+
+test("repo remove todos os filtros de um usuario", () => {
+  const { db, repo } = createInMemoryRepo();
+
+  repo.upsertUser("u1", "Ana");
+  repo.addKeyword("u1", "notebook");
+  repo.addKeyword("u1", "ssd");
+
+  const removed = repo.removeAllKeywords("u1");
+  assert.equal(removed, 2);
+  assert.deepEqual(repo.listKeywords("u1"), []);
+
+  db.close();
+});

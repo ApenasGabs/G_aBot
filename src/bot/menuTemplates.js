@@ -1,14 +1,14 @@
 /**
  * @fileoverview Templates dos menus do GaBot
  * Centraliza todos os textos dos menus para fácil manutenção
- * 
+ *
  * @module menuTemplates
  */
 
 /**
  * Template do menu principal
  * Mostra ao usuário os comandos rápidos disponíveis
- * 
+ *
  * @returns {string} Texto formatado do menu principal
  */
 export function getMainMenu() {
@@ -20,6 +20,7 @@ Olá! Use os atalhos rápidos:
 ↳ \`+ termo\` : Adicionar (ex: + tv, pc)
 ↳ \`+ termo ate 3500\` : Alertar ate valor maximo
 ↳ \`- termo\` : Remover filtro
+↳ \`limpar\` : Remover todos os filtros
 ↳ \`filtros\` : Meus filtros ativos
 
 🎟️ *CUPONS*
@@ -40,7 +41,7 @@ Olá! Use os atalhos rápidos:
 /**
  * Template do menu de ajuda completa
  * Guia detalhado de todos os comandos
- * 
+ *
  * @returns {string} Texto formatado do menu de ajuda
  */
 export function getHelpMenu() {
@@ -51,6 +52,7 @@ export function getHelpMenu() {
 • \`+ item1, item2\` : Adiciona vários
 • \`+ item ate 3500\` : Adiciona com preco maximo
 • \`- item1\` : Remove um filtro
+• \`limpar\` ou \`/limparfiltros\` : Remove todos os filtros
 • \`list\` ou \`filtros\` : Lista o que você segue
 
 🛒 *CUPONS & LOJAS*
@@ -76,7 +78,7 @@ export function getHelpMenu() {
 /**
  * Template do menu admin
  * Lista comandos administrativos
- * 
+ *
  * @returns {string} Texto formatado do menu admin
  */
 export function getAdminMenu() {
@@ -96,6 +98,7 @@ export function getAdminMenu() {
 📊 *SISTEMA*
 • \`stats\` : Status e Versão
 • \`logs\` : Ver últimos erros
+• \`gruposbot\` : Listar grupos onde o bot esta
 • \`sys help\` : Comandos de terminal
 • \`sys ls\` : Listar arquivos do servidor
 • \`sys bot restart\` : Reiniciar bot via PM2
@@ -107,7 +110,7 @@ export function getAdminMenu() {
 /**
  * Template do menu de filtros (legacy)
  * Mantido para compatibilidade
- * 
+ *
  * @returns {string} Texto formatado do menu de filtros
  */
 export function getFiltersMenu() {
@@ -117,6 +120,7 @@ Use os comandos:
 • \`+ termo\` : Adicionar filtro
 • \`+ termo ate 3500\` : Adicionar com limite de preco
 • \`- termo\` : Remover filtro
+• \`limpar\` : Remover todos os filtros
 • \`list\` : Ver seus filtros
 
 Digite \`menu\` para voltar`;
@@ -125,7 +129,7 @@ Digite \`menu\` para voltar`;
 /**
  * Template do menu de cupons (legacy)
  * Mantido para compatibilidade
- * 
+ *
  * @returns {string} Texto formatado do menu de cupons
  */
 export function getCouponsMenu() {
@@ -145,7 +149,7 @@ Digite \`menu\` para voltar`;
 
 /**
  * Template de erro - comando não reconhecido
- * 
+ *
  * @returns {string} Mensagem de erro
  */
 export function getCommandNotFoundError() {
@@ -154,7 +158,7 @@ export function getCommandNotFoundError() {
 
 /**
  * Template de erro - argumento ausente
- * 
+ *
  * @param {string} command - Comando que requer argumento
  * @param {string} example - Exemplo de uso
  * @returns {string} Mensagem de erro com exemplo
@@ -165,35 +169,35 @@ export function getMissingArgumentError(command, example) {
 
 /**
  * Template de sucesso - filtro adicionado
- * 
+ *
  * @param {string|Array} terms - Termo(s) adicionado(s)
  * @returns {string} Mensagem de sucesso
  */
 export function getFilterAddedMessage(terms) {
   if (Array.isArray(terms)) {
     const count = terms.length;
-    return `✅ ${count} filtro(s) adicionado(s):\n${terms.map(t => `  • ${t}`).join("\n")}`;
+    return `✅ ${count} filtro(s) adicionado(s):\n${terms.map((t) => `  • ${t}`).join("\n")}`;
   }
   return `✅ Filtro adicionado: "${terms}"`;
 }
 
 /**
  * Template de sucesso - filtro removido
- * 
+ *
  * @param {string|Array} terms - Termo(s) removido(s)
  * @returns {string} Mensagem de sucesso
  */
 export function getFilterRemovedMessage(terms) {
   if (Array.isArray(terms)) {
     const count = terms.length;
-    return `✅ ${count} filtro(s) removido(s):\n${terms.map(t => `  • ${t}`).join("\n")}`;
+    return `✅ ${count} filtro(s) removido(s):\n${terms.map((t) => `  • ${t}`).join("\n")}`;
   }
   return `✅ Filtro removido: "${terms}"`;
 }
 
 /**
  * Template de erro - filtro duplicado
- * 
+ *
  * @param {string} term - Termo que já existe
  * @returns {string} Mensagem de erro
  */
@@ -203,7 +207,7 @@ export function getFilterDuplicateError(term) {
 
 /**
  * Template de erro - filtro não encontrado
- * 
+ *
  * @param {string} term - Termo que não foi encontrado
  * @returns {string} Mensagem de erro
  */
@@ -213,7 +217,7 @@ export function getFilterNotFoundError(term) {
 
 /**
  * Template de lista vazia - nenhum filtro
- * 
+ *
  * @returns {string} Mensagem
  */
 export function getNoFiltersMessage() {
@@ -222,7 +226,7 @@ export function getNoFiltersMessage() {
 
 /**
  * Template para exibir lista de filtros
- * 
+ *
  * @param {Array<{term: string}>} keywords - Lista de filtros
  * @returns {string} Mensagem formatada
  */
@@ -231,16 +235,14 @@ export function getFiltersListMessage(keywords) {
     return getNoFiltersMessage();
   }
 
-  const list = keywords
-    .map(({ term }) => `• ${term}`)
-    .join("\n");
+  const list = keywords.map(({ term }) => `• ${term}`).join("\n");
 
   return `📋 *Seus Filtros Ativos* (${keywords.length}):\n\n${list}\n\n_Use \`- termo\` para remover_`;
 }
 
 /**
  * Template para sugestão de grupo duplicada
- * 
+ *
  * @param {number} id - ID da sugestão anterior
  * @param {string} status - Status da sugestão
  * @returns {string} Mensagem
@@ -251,7 +253,7 @@ export function getGroupDuplicateMessage(id, status) {
 
 /**
  * Template para sugestão recebida
- * 
+ *
  * @returns {string} Mensagem de confirmação
  */
 export function getSuggestionReceivedMessage() {
@@ -260,7 +262,7 @@ export function getSuggestionReceivedMessage() {
 
 /**
  * Template para erro de link inválido
- * 
+ *
  * @returns {string} Mensagem de erro
  */
 export function getInvalidLinkError() {
@@ -269,7 +271,7 @@ export function getInvalidLinkError() {
 
 /**
  * Template para mensagem de boas-vindas
- * 
+ *
  * @param {string} userName - Nome do usuário
  * @returns {string} Mensagem personalizada
  */
@@ -279,7 +281,7 @@ export function getWelcomeMessage(userName) {
 
 /**
  * Template para status do bot
- * 
+ *
  * @param {Object} stats - Estatísticas do bot
  * @param {string} stats.version - Versão
  * @param {string} stats.uptime - Tempo online
@@ -300,7 +302,7 @@ _Sistema operacional_`;
 
 /**
  * Formata múltiplas linhas com padrão consistente
- * 
+ *
  * @param {string} title - Título da seção
  * @param {Array<string>} items - Items a exibir
  * @param {string} emoji - Emoji para o título
@@ -311,6 +313,6 @@ export function formatSection(title, items, emoji = "📋") {
     return `${emoji} ${title}\n_Nada para exibir_`;
   }
 
-  const list = items.map(item => `• ${item}`).join("\n");
+  const list = items.map((item) => `• ${item}`).join("\n");
   return `${emoji} *${title}* (${items.length}):\n\n${list}`;
 }

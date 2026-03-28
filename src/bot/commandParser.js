@@ -53,6 +53,7 @@ const SHORTCUTS = {
   compacto: "/alerta",
   detalhado: "/alerta",
   filtros: "/meusfiltros",
+  limpar: "/limparfiltros",
   cupons: "/cupons",
   lojas: "/meuscupons",
   now: "/cupons",

@@ -2,7 +2,7 @@
 .baileys_auth/
 .baileys_auth_gabot_ofertas/
 node_modules
-
+scrap*
 # Environment variables
 .env
 

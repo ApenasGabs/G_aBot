@@ -21,13 +21,9 @@ import {
 import {
   hasWildcard,
   processWildcardBatch,
-  splitByComma
+  splitByComma,
 } from "./batchProcessor.js";
-import {
-  getArguments,
-  getFirstToken,
-  normalizeText
-} from "./commandParser.js";
+import { getArguments, getFirstToken, normalizeText } from "./commandParser.js";
 import * as templates from "./menuTemplates.js";
 
 const pendingSysConfirmations = new Map();
@@ -37,14 +33,16 @@ const SYS_CONFIRM_TTL_MS = 60 * 1000;
  * Manipulador principal de comandos admin
  * Suporta novos atalhos: ok, no, stats, ia
  * Mantém compatibilidade com /adm [comando]
- * 
+ *
  * @async
  */
 export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   console.log(`[ADMIN CMD] Recebeu comando: "${text}"`);
-  
+
   const reply = async (messageText) => {
-    console.log(`[ADMIN CMD] Enviando resposta: ${messageText.substring(0, 100)}...`);
+    console.log(
+      `[ADMIN CMD] Enviando resposta: ${messageText.substring(0, 100)}...`,
+    );
     await client.sendMessage(chatId, { text: messageText });
     console.log(`[ADMIN CMD] Resposta enviada com sucesso`);
   };
@@ -55,7 +53,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   const argsText = getArguments(trimmed);
 
   // ========== NOVOS COMANDOS SIMPLIFICADOS ==========
-  
+
   // Comando: ok [id] - Aprovar sugestão
   if (firstToken === "ok") {
     if (!argsText) {
@@ -81,14 +79,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
     const match = argsText.match(/^([gs])(\d+)$/);
     if (match) {
       const [, type, id] = match;
-      await updateSuggestionStatus(
-        reply,
-        repo,
-        client,
-        type,
-        id,
-        "approved"
-      );
+      await updateSuggestionStatus(reply, repo, client, type, id, "approved");
       return;
     }
 
@@ -118,14 +109,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
     const match = argsText.match(/^([gs])(\d+)$/);
     if (match) {
       const [, type, id] = match;
-      await updateSuggestionStatus(
-        reply,
-        repo,
-        client,
-        type,
-        id,
-        "rejected"
-      );
+      await updateSuggestionStatus(reply, repo, client, type, id, "rejected");
       return;
     }
 
@@ -174,7 +158,9 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   // Comando: . [pergunta] - prompt IA direto
   if (firstToken === ".") {
     if (!argsText) {
-      await reply("❌ Uso: . [pergunta]\nExemplo: . extraia cupom e loja desta mensagem");
+      await reply(
+        "❌ Uso: . [pergunta]\nExemplo: . extraia cupom e loja desta mensagem",
+      );
       return;
     }
     await handleOllamaAsk(reply, argsText);
@@ -184,6 +170,12 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   // Comando: logs - últimos logs consolidados
   if (firstToken === "logs") {
     await handleRecentLogs(reply);
+    return;
+  }
+
+  // Comando: gruposbot - lista todos os grupos onde o bot participa
+  if (firstToken === "gruposbot") {
+    await listBotGroups(reply, client);
     return;
   }
 
@@ -211,6 +203,7 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
     adm12: "/adm ia restart",
     adm13: "/adm ia instancias",
     adm14: "/adm ia ask",
+    adm15: "/adm gruposbot",
   };
 
   if (adminAliases[firstTokenNoSlash]) {
@@ -220,7 +213,9 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   } else if (firstTokenNoSlash === "adm5") {
     normalizedCommand = restArgs ? `/adm aprovar ${restArgs}` : "/adm aprovar";
   } else if (firstTokenNoSlash === "adm6") {
-    normalizedCommand = restArgs ? `/adm rejeitar ${restArgs}` : "/adm rejeitar";
+    normalizedCommand = restArgs
+      ? `/adm rejeitar ${restArgs}`
+      : "/adm rejeitar";
   }
 
   console.log(`[ADMIN CMD] Comando normalizado: "${normalizedCommand}"`);
@@ -259,7 +254,10 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   }
 
   // Comando /adm status - mostra status do bot
-  if (normalizedCommand === "/adm status" || normalizedCommand === "/adm health") {
+  if (
+    normalizedCommand === "/adm status" ||
+    normalizedCommand === "/adm health"
+  ) {
     console.log(`[ADMIN CMD] Mostrando status do bot`);
     await showBotStatus(reply, repo);
     return;
@@ -275,6 +273,11 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
     return;
   }
 
+  if (normalizedCommand === "/adm gruposbot") {
+    await listBotGroups(reply, client);
+    return;
+  }
+
   if (normalizedCommand === "/adm ia") {
     await showOllamaMenu(reply);
     return;
@@ -286,25 +289,33 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
     return;
   }
 
-  const iaStatusMatch = normalizedCommand.match(/^\/adm\s+ia\s+status(?:\s+(\S+))?$/);
+  const iaStatusMatch = normalizedCommand.match(
+    /^\/adm\s+ia\s+status(?:\s+(\S+))?$/,
+  );
   if (iaStatusMatch) {
     await handleOllamaStatus(reply, iaStatusMatch[1]);
     return;
   }
 
-  const iaStartMatch = normalizedCommand.match(/^\/adm\s+ia\s+start(?:\s+(\S+))?$/);
+  const iaStartMatch = normalizedCommand.match(
+    /^\/adm\s+ia\s+start(?:\s+(\S+))?$/,
+  );
   if (iaStartMatch) {
     await handleOllamaControl(reply, "start", iaStartMatch[1]);
     return;
   }
 
-  const iaStopMatch = normalizedCommand.match(/^\/adm\s+ia\s+stop(?:\s+(\S+))?$/);
+  const iaStopMatch = normalizedCommand.match(
+    /^\/adm\s+ia\s+stop(?:\s+(\S+))?$/,
+  );
   if (iaStopMatch) {
     await handleOllamaControl(reply, "stop", iaStopMatch[1]);
     return;
   }
 
-  const iaRestartMatch = normalizedCommand.match(/^\/adm\s+ia\s+restart(?:\s+(\S+))?$/);
+  const iaRestartMatch = normalizedCommand.match(
+    /^\/adm\s+ia\s+restart(?:\s+(\S+))?$/,
+  );
   if (iaRestartMatch) {
     await handleOllamaControl(reply, "restart", iaRestartMatch[1]);
     return;
@@ -322,14 +333,18 @@ export const handleAdminCommand = async ({ client, repo, chatId, text }) => {
   }
 
   // Comando /adm aprovar [id] ou /adm rejeitar [id]
-  const approveMatch = normalizedCommand.match(/^\/adm\s+aprovar\s+([gs])\s*(\d+)$/);
+  const approveMatch = normalizedCommand.match(
+    /^\/adm\s+aprovar\s+([gs])\s*(\d+)$/,
+  );
   if (approveMatch) {
     const [, type, id] = approveMatch;
     await updateSuggestionStatus(reply, repo, client, type, id, "approved");
     return;
   }
 
-  const rejectMatch = normalizedCommand.match(/^\/adm\s+rejeitar\s+([gs])\s*(\d+)$/);
+  const rejectMatch = normalizedCommand.match(
+    /^\/adm\s+rejeitar\s+([gs])\s*(\d+)$/,
+  );
   if (rejectMatch) {
     const [, type, id] = rejectMatch;
     await updateSuggestionStatus(reply, repo, client, type, id, "rejected");
@@ -345,7 +360,12 @@ const statusLabel = (status) => {
   return status || "desconhecido";
 };
 
-const notifySuggestionStatusChange = async (client, suggestionType, suggestion, status) => {
+const notifySuggestionStatusChange = async (
+  client,
+  suggestionType,
+  suggestion,
+  status,
+) => {
   if (!client || !suggestion?.user_id) return;
 
   const idPrefix = suggestionType === "g" ? "g" : "s";
@@ -369,7 +389,9 @@ const notifySuggestionStatusChange = async (client, suggestionType, suggestion, 
   try {
     await client.sendMessage(suggestion.user_id, { text: message });
   } catch (error) {
-    console.log(`[ADMIN CMD] Nao foi possivel notificar ${suggestion.user_id}: ${error.message}`);
+    console.log(
+      `[ADMIN CMD] Nao foi possivel notificar ${suggestion.user_id}: ${error.message}`,
+    );
   }
 };
 
@@ -393,7 +415,7 @@ const showOllamaMenu = async (reply) => {
       "ia reset local",
       ". qual o melhor cupom da mensagem X?",
       ". local::extraia cupom e loja desta mensagem: ...",
-    ].join("\n")
+    ].join("\n"),
   );
 };
 
@@ -401,7 +423,9 @@ const executeTerminalAction = async (reply, parsed) => {
   await reply(`Executando: ${parsed.summary}...`);
 
   if (parsed.useSudo && !BOT_CONFIG.sudoPassword) {
-    await reply("❌ Senha sudo nao configurada. Defina BOT_SUDO_PASSWORD no .env.");
+    await reply(
+      "❌ Senha sudo nao configurada. Defina BOT_SUDO_PASSWORD no .env.",
+    );
     return;
   }
 
@@ -437,7 +461,9 @@ const executeTerminalAction = async (reply, parsed) => {
 };
 
 const handleTerminalControl = async (reply, argsText, chatId) => {
-  const normalizedArgs = String(argsText || "").trim().toLowerCase();
+  const normalizedArgs = String(argsText || "")
+    .trim()
+    .toLowerCase();
 
   if (normalizedArgs === "confirmar" || normalizedArgs === "sim") {
     const pending = pendingSysConfirmations.get(chatId);
@@ -489,7 +515,7 @@ const handleTerminalControl = async (reply, argsText, chatId) => {
         `⚠️ Tem certeza que deseja executar: ${parsed.summary}?`,
         "Responda com: sys confirmar",
         "Para cancelar: sys cancelar",
-      ].join("\n")
+      ].join("\n"),
     );
     return;
   }
@@ -513,7 +539,9 @@ const extractAskArgs = (rawText) => {
     return directAlias[1].trim();
   }
 
-  const full = rawText.match(/^\/?adm(?:in)?\s+ia\s+(?:ask|perguntar|prompt)\s+([\s\S]+)$/i);
+  const full = rawText.match(
+    /^\/?adm(?:in)?\s+ia\s+(?:ask|perguntar|prompt)\s+([\s\S]+)$/i,
+  );
   if (full?.[1]) {
     return full[1].trim();
   }
@@ -543,7 +571,9 @@ const handleOllamaAsk = async (reply, askInput) => {
   const { instanceName, prompt } = parseAskPayload(askInput);
 
   if (!prompt) {
-    await reply("Uso: . [instancia::]pergunta\nEx: . local::extraia cupom e loja desta mensagem");
+    await reply(
+      "Uso: . [instancia::]pergunta\nEx: . local::extraia cupom e loja desta mensagem",
+    );
     return;
   }
 
@@ -559,16 +589,17 @@ const handleOllamaAsk = async (reply, askInput) => {
     return;
   }
 
-  const answer = result.answer.length > 1500
-    ? `${result.answer.slice(0, 1500)}\n...[resposta truncada]`
-    : result.answer;
+  const answer =
+    result.answer.length > 1500
+      ? `${result.answer.slice(0, 1500)}\n...[resposta truncada]`
+      : result.answer;
 
   await reply(
     [
       `✅ Resposta do modelo (${result.instanceName} | ${result.model})`,
       "",
       answer,
-    ].join("\n")
+    ].join("\n"),
   );
 };
 
@@ -603,21 +634,32 @@ const handleOllamaControl = async (reply, action, instanceName) => {
   await reply(`Executando '${action}' na instancia '${target}'...`);
 
   const result = await controlOllamaInstance(action, target);
-  const statusMessage = formatOllamaStatus(result.statusAfter || {
-    instanceName: target,
-    online: false,
-    error: result.error || "sem status",
-    models: [],
-    baseUrl: "",
-  });
+  const statusMessage = formatOllamaStatus(
+    result.statusAfter || {
+      instanceName: target,
+      online: false,
+      error: result.error || "sem status",
+      models: [],
+      baseUrl: "",
+    },
+  );
 
   if (result.ok) {
-    await reply([`✅ Acao '${action}' concluida para '${target}'.`, statusMessage].join("\n\n"));
+    await reply(
+      [`✅ Acao '${action}' concluida para '${target}'.`, statusMessage].join(
+        "\n\n",
+      ),
+    );
     return;
   }
 
   const errorText = result.error || result.stderr || "falha ao executar acao";
-  await reply([`❌ Falha em '${action}' para '${target}': ${errorText}`, statusMessage].join("\n\n"));
+  await reply(
+    [
+      `❌ Falha em '${action}' para '${target}': ${errorText}`,
+      statusMessage,
+    ].join("\n\n"),
+  );
 };
 
 const formatOllamaStatus = (status) => {
@@ -625,9 +667,10 @@ const formatOllamaStatus = (status) => {
   const baseUrl = status.baseUrl || "-";
   const onlineLabel = status.online ? "online" : "offline";
   const modelCount = status.modelCount || 0;
-  const modelsText = status.models && status.models.length > 0
-    ? status.models.slice(0, 5).join(", ")
-    : "nenhum";
+  const modelsText =
+    status.models && status.models.length > 0
+      ? status.models.slice(0, 5).join(", ")
+      : "nenhum";
 
   const lines = [
     `Instancia: ${instance}`,
@@ -704,7 +747,10 @@ const readSystemTemperatureC = async () => {
     const values = [];
     for (const zone of zones) {
       try {
-        const raw = await readFile(path.join("/sys/class/thermal", zone, "temp"), "utf8");
+        const raw = await readFile(
+          path.join("/sys/class/thermal", zone, "temp"),
+          "utf8",
+        );
         const parsed = Number(String(raw).trim());
         if (!Number.isFinite(parsed) || parsed <= 0) continue;
 
@@ -747,9 +793,9 @@ const showBotStatus = async (reply, repo) => {
   const sysDays = Math.floor(systemUptimeSec / 86400);
   const sysHours = Math.floor((systemUptimeSec % 86400) / 3600);
   const sysMinutes = Math.floor((systemUptimeSec % 3600) / 60);
-  
-  const timestamp = new Date().toLocaleString('pt-BR', { 
-    timeZone: 'America/Sao_Paulo' 
+
+  const timestamp = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
   });
 
   const metrics = repo?.listCouponStoreMetrics
@@ -763,14 +809,15 @@ const showBotStatus = async (reply, repo) => {
       const detected = Number(row.detected_count || 0);
       const matched = Number(row.matched_count || 0);
       const falsePositive = Number(row.false_positive_count || 0);
-      const matchRate = detected > 0 ? Math.round((matched / detected) * 100) : 0;
+      const matchRate =
+        detected > 0 ? Math.round((matched / detected) * 100) : 0;
       const falsePositiveRate =
         detected + falsePositive > 0
           ? Math.round((falsePositive / (detected + falsePositive)) * 100)
           : 0;
 
       metricsLines.push(
-        `- ${row.store_name}: match ${matchRate}% (${matched}/${detected}) | falso+ ${falsePositiveRate}% (${falsePositive})`
+        `- ${row.store_name}: match ${matchRate}% (${matched}/${detected}) | falso+ ${falsePositiveRate}% (${falsePositive})`,
       );
     }
   }
@@ -797,7 +844,7 @@ const showBotStatus = async (reply, repo) => {
       ...metricsLines,
       "",
       "Bot operacional 🟢",
-    ].join("\n")
+    ].join("\n"),
   );
 };
 
@@ -826,11 +873,11 @@ const listAllSuggestions = async (reply, repo, client) => {
     lines.push("*Grupos:*");
     groupSuggestions.forEach((s) => {
       lines.push(
-        `[g${s.id}] ${s.group_name || 'Sem nome'}`,
+        `[g${s.id}] ${s.group_name || "Sem nome"}`,
         `  Status: ${statusLabel(s.status)}`,
-        `  Usuario: ${s.user_name || 'Desconhecido'}`,
+        `  Usuario: ${s.user_name || "Desconhecido"}`,
         `  Link: ${s.group_link}`,
-        ""
+        "",
       );
     });
   }
@@ -839,10 +886,10 @@ const listAllSuggestions = async (reply, repo, client) => {
     lines.push("*Sugestões Gerais:*");
     generalSuggestions.forEach((s) => {
       lines.push(
-        `[s${s.id}] ${s.suggestion_text.substring(0, 60)}${s.suggestion_text.length > 60 ? '...' : ''}`,
+        `[s${s.id}] ${s.suggestion_text.substring(0, 60)}${s.suggestion_text.length > 60 ? "..." : ""}`,
         `  Status: ${statusLabel(s.status)}`,
-        `  Usuario: ${s.user_name || 'Desconhecido'}`,
-        ""
+        `  Usuario: ${s.user_name || "Desconhecido"}`,
+        "",
       );
     });
   }
@@ -868,12 +915,12 @@ const listGroupSuggestions = async (reply, repo, client) => {
 
   suggestions.forEach((s) => {
     lines.push(
-      `[g${s.id}] ${s.group_name || 'Sem nome'}`,
+      `[g${s.id}] ${s.group_name || "Sem nome"}`,
       `  Status: ${statusLabel(s.status)}`,
-      `  Usuario: ${s.user_name || 'Desconhecido'}`,
+      `  Usuario: ${s.user_name || "Desconhecido"}`,
       `  Link: ${s.group_link}`,
-      `  Data: ${new Date(s.created_at).toLocaleDateString('pt-BR')}`,
-      ""
+      `  Data: ${new Date(s.created_at).toLocaleDateString("pt-BR")}`,
+      "",
     );
   });
 
@@ -900,9 +947,9 @@ const listGeneralSuggestions = async (reply, repo, client) => {
     lines.push(
       `[s${s.id}] ${s.suggestion_text}`,
       `  Status: ${statusLabel(s.status)}`,
-      `  Usuario: ${s.user_name || 'Desconhecido'}`,
-      `  Data: ${new Date(s.created_at).toLocaleDateString('pt-BR')}`,
-      ""
+      `  Usuario: ${s.user_name || "Desconhecido"}`,
+      `  Data: ${new Date(s.created_at).toLocaleDateString("pt-BR")}`,
+      "",
     );
   });
 
@@ -911,8 +958,12 @@ const listGeneralSuggestions = async (reply, repo, client) => {
 };
 
 const showReadSuggestions = async (reply, repo) => {
-  const groupSuggestions = repo.listPendingGroupSuggestions(20).filter((s) => s.status === "read");
-  const generalSuggestions = repo.listPendingGeneralSuggestions(20).filter((s) => s.status === "read");
+  const groupSuggestions = repo
+    .listPendingGroupSuggestions(20)
+    .filter((s) => s.status === "read");
+  const generalSuggestions = repo
+    .listPendingGeneralSuggestions(20)
+    .filter((s) => s.status === "read");
 
   if (groupSuggestions.length === 0 && generalSuggestions.length === 0) {
     await reply("Nenhuma sugestao marcada como lida no momento.");
@@ -929,7 +980,9 @@ const showReadSuggestions = async (reply, repo) => {
   }
 
   for (const s of generalSuggestions) {
-    lines.push(`[s${s.id}] ${s.suggestion_text.substring(0, 60)}${s.suggestion_text.length > 60 ? "..." : ""}`);
+    lines.push(
+      `[s${s.id}] ${s.suggestion_text.substring(0, 60)}${s.suggestion_text.length > 60 ? "..." : ""}`,
+    );
     lines.push(`  Usuario: ${s.user_name || "Desconhecido"}`);
     lines.push("  Status: lida");
     lines.push("");
@@ -954,14 +1007,14 @@ const handleSuggestionBatch = async (reply, repo, client, ids, action) => {
 
     const [, type, numId] = match;
     const numIdParsed = parseInt(numId, 10);
-    
+
     let success = false;
     let suggestion = null;
-    
-    if (type === 'g') {
+
+    if (type === "g") {
       suggestion = repo.getGroupSuggestionById(numIdParsed);
       success = repo.updateGroupSuggestionStatus(numIdParsed, action);
-    } else if (type === 's') {
+    } else if (type === "s") {
       suggestion = repo.getGeneralSuggestionById(numIdParsed);
       success = repo.updateGeneralSuggestionStatus(numIdParsed, action);
     }
@@ -999,7 +1052,13 @@ const handleRejectBatch = async (reply, repo, client, ids) => {
   await handleSuggestionBatch(reply, repo, client, ids, "rejected");
 };
 
-const handleWildcardSuggestions = async (reply, repo, client, prefix, action) => {
+const handleWildcardSuggestions = async (
+  reply,
+  repo,
+  client,
+  prefix,
+  action,
+) => {
   try {
     const cleanedPrefix = (prefix || "").trim();
     if (!["g", "s"].includes(cleanedPrefix)) {
@@ -1007,14 +1066,19 @@ const handleWildcardSuggestions = async (reply, repo, client, prefix, action) =>
       return;
     }
 
-    const suggestions = cleanedPrefix === "g"
-      ? repo.listPendingGroupSuggestions(200)
-      : repo.listPendingGeneralSuggestions(200);
+    const suggestions =
+      cleanedPrefix === "g"
+        ? repo.listPendingGroupSuggestions(200)
+        : repo.listPendingGeneralSuggestions(200);
 
-    const pendingSuggestions = suggestions.filter((s) => s.status === "pending");
+    const pendingSuggestions = suggestions.filter(
+      (s) => s.status === "pending",
+    );
 
     if (pendingSuggestions.length === 0) {
-      await reply(`⚠️ Nenhuma sugestão pendente com prefixo '${cleanedPrefix}'`);
+      await reply(
+        `⚠️ Nenhuma sugestão pendente com prefixo '${cleanedPrefix}'`,
+      );
       return;
     }
 
@@ -1034,7 +1098,12 @@ const handleWildcardSuggestions = async (reply, repo, client, prefix, action) =>
             : repo.updateGeneralSuggestionStatus(currentSuggestion.id, action);
 
         if (success) {
-          await notifySuggestionStatusChange(client, cleanedPrefix, currentSuggestion, action);
+          await notifySuggestionStatusChange(
+            client,
+            cleanedPrefix,
+            currentSuggestion,
+            action,
+          );
         }
 
         return { success };
@@ -1049,7 +1118,9 @@ const handleWildcardSuggestions = async (reply, repo, client, prefix, action) =>
     const processed = result.matched.filter((item) => item.success).length;
 
     const actionLabel = action === "approved" ? "aprovadas" : "rejeitadas";
-    await reply(`✅ ${processed}/${pendingSuggestions.length} sugestões ${actionLabel}`);
+    await reply(
+      `✅ ${processed}/${pendingSuggestions.length} sugestões ${actionLabel}`,
+    );
   } catch (error) {
     console.error("[ADMIN] Erro ao processar wildcard:", error);
     await reply("❌ Erro ao processar wildcards");
@@ -1070,7 +1141,14 @@ const handleRejectWildcard = async (reply, repo, client, prefix) => {
   await handleWildcardSuggestions(reply, repo, client, prefix, "rejected");
 };
 
-const updateSuggestionStatus = async (reply, repo, client, type, id, status) => {
+const updateSuggestionStatus = async (
+  reply,
+  repo,
+  client,
+  type,
+  id,
+  status,
+) => {
   const numId = parseInt(id, 10);
   if (isNaN(numId)) {
     await reply("ID inválido.");
@@ -1079,10 +1157,10 @@ const updateSuggestionStatus = async (reply, repo, client, type, id, status) => 
 
   let success = false;
   let suggestion = null;
-  if (type === 'g') {
+  if (type === "g") {
     suggestion = repo.getGroupSuggestionById(numId);
     success = repo.updateGroupSuggestionStatus(numId, status);
-  } else if (type === 's') {
+  } else if (type === "s") {
     suggestion = repo.getGeneralSuggestionById(numId);
     success = repo.updateGeneralSuggestionStatus(numId, status);
   } else {
@@ -1091,7 +1169,7 @@ const updateSuggestionStatus = async (reply, repo, client, type, id, status) => 
   }
 
   if (success) {
-    const statusText = status === 'approved' ? 'aprovada' : 'rejeitada';
+    const statusText = status === "approved" ? "aprovada" : "rejeitada";
     await reply(`✅ Sugestão ${type}${id} ${statusText} com sucesso.`);
 
     if (suggestion) {
@@ -1104,8 +1182,18 @@ const updateSuggestionStatus = async (reply, repo, client, type, id, status) => 
 
 const handleRecentLogs = async (reply) => {
   const sections = [];
-  const groupsSection = await buildLogsSection(PATHS.logsGroupsDir, "Grupos", 2, 2);
-  const usersSection = await buildLogsSection(PATHS.logsUsersDir, "Privado", 2, 2);
+  const groupsSection = await buildLogsSection(
+    PATHS.logsGroupsDir,
+    "Grupos",
+    2,
+    2,
+  );
+  const usersSection = await buildLogsSection(
+    PATHS.logsUsersDir,
+    "Privado",
+    2,
+    2,
+  );
 
   if (groupsSection) sections.push(groupsSection);
   if (usersSection) sections.push(usersSection);
@@ -1116,6 +1204,39 @@ const handleRecentLogs = async (reply) => {
   }
 
   await reply(["📜 *Últimos logs*", "", ...sections].join("\n"));
+};
+
+const listBotGroups = async (reply, client) => {
+  try {
+    const groupsMap = await client.groupFetchAllParticipating();
+    const groups = Object.values(groupsMap || {});
+
+    if (groups.length === 0) {
+      await reply("⚠️ Nenhum grupo encontrado para o bot.");
+      return;
+    }
+
+    const sorted = groups
+      .map((group) => ({
+        id: group?.id || "",
+        name: group?.subject || "Sem nome",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+    const lines = [
+      "📚 *Grupos do Bot*",
+      `Total: ${sorted.length}`,
+      "",
+      ...sorted.map(
+        (group, index) => `${index + 1}. ${group.name} (${group.id})`,
+      ),
+    ];
+
+    await reply(lines.join("\n"));
+  } catch (error) {
+    console.error("[ADMIN] Erro ao listar grupos do bot:", error);
+    await reply("❌ Nao foi possivel listar os grupos do bot.");
+  }
 };
 
 const buildLogsSection = async (dirPath, label, maxFiles, maxLinesPerFile) => {
@@ -1141,7 +1262,7 @@ const buildLogsSection = async (dirPath, label, maxFiles, maxLinesPerFile) => {
           timestamp = 0;
         }
         return { name, lines, timestamp };
-      })
+      }),
     );
 
     const latestFiles = filesWithMtime
@@ -1155,7 +1276,9 @@ const buildLogsSection = async (dirPath, label, maxFiles, maxLinesPerFile) => {
       for (const line of tailLines) {
         try {
           const parsed = JSON.parse(line);
-          const text = String(parsed.text || "").replace(/\s+/g, " ").slice(0, 90);
+          const text = String(parsed.text || "")
+            .replace(/\s+/g, " ")
+            .slice(0, 90);
           sectionLines.push(`  ${parsed.timestamp || "sem-data"} | ${text}`);
         } catch {
           sectionLines.push(`  ${line.slice(0, 90)}`);

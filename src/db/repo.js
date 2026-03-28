@@ -58,6 +58,11 @@ export function createRepo(db) {
     WHERE user_id = ? AND term_normalized = ?
   `);
 
+  const removeAllKeywordsStmt = db.prepare(`
+    DELETE FROM keywords
+    WHERE user_id = ?
+  `);
+
   const listKeywordsStmt = db.prepare(`
     SELECT term, max_price_cents FROM keywords
     WHERE user_id = ?
@@ -489,6 +494,10 @@ export function createRepo(db) {
     removeKeyword(chatId, term) {
       const result = removeKeywordStmt.run(chatId, normalizeText(term));
       return result.changes > 0;
+    },
+    removeAllKeywords(chatId) {
+      const result = removeAllKeywordsStmt.run(chatId);
+      return result.changes;
     },
     listKeywords(chatId) {
       return listKeywordsStmt.all(chatId);
