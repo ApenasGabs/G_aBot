@@ -1,427 +1,341 @@
-# G_aBot - Bot de Ofertas WhatsApp 🤖
+# G_aBot - Bot de Ofertas no WhatsApp
 
-Bot de WhatsApp com **Baileys + SQLite** para monitorar mensagens em grupos e encaminhar **ofertas e cupons** para usuários com filtros cadastrados.
+Bot de WhatsApp focado em ofertas e cupons, com filtros por usuario, fluxo de sugestoes, painel admin e modulo de Jornal de Ofertas (scraping + PDF + OCR + historico de precos).
 
-**Versão:** v0.2.0 (Com Redesign de Interface)  
-**Status:** 🟢 Pronto para Produção  
-**Última Atualização:** 9 de março de 2026
+Versao atual do projeto: v0.3.3
 
----
+## Visao Geral
 
-## 📋 Requisitos
+O bot faz 3 frentes principais:
 
-- **Node.js** 20+
-- **npm** ou **pnpm**
-- **Ollama** (opcional, para análise com IA)
+1. Monitoramento de mensagens de grupos/canais para detectar cupons e disparar alertas para quem segue filtros.
+2. Atendimento em chat privado com comandos rapidos para filtros, cupons e colaboracao.
+3. Operacao do modulo Jornal de Ofertas, com atualizacao automatica e consultas por categoria/termo.
 
----
+## Stack Atual
 
-## 🚀 Início Rápido
+- Runtime: Node.js (ESM)
+- Bot WhatsApp: @whiskeysockets/baileys
+- Banco local: SQLite via better-sqlite3
+- Configuracao: dotenv
+- Scraping e parsing: axios, cheerio, pdf-parse, pdfjs-dist
+- OCR: tesseract.js (fallback) + utilitarios Poppler quando disponiveis
+- Utilitarios: qrcode-terminal, link-preview-js
+- Processo em producao: PM2 (via ecosystem.config.cjs)
 
-### 1. Instalar dependências
+Dependencias em package.json:
+
+- @whiskeysockets/baileys
+- better-sqlite3
+- dotenv
+- link-preview-js
+- qrcode-terminal
+- cheerio
+- axios
+- pdf-parse
+- tesseract.js
+- pdfjs-dist
+
+## Requisitos Para Rodar
+
+## Obrigatorios
+
+- Node.js 20+
+- npm ou pnpm
+- Acesso ao WhatsApp para escanear QR na primeira execucao
+
+## Recomendados (modulo Jornal)
+
+- Poppler utils no sistema (pdftotext, pdfinfo, pdftoppm) para melhorar extracao/diagnostico de PDF
+- CPU e RAM suficientes para OCR quando necessario
+
+## Opcionais
+
+- Ollama local/remoto para parser de cupom com IA
+- PM2 para manter processo em producao
+
+## Instalacao e Execucao
+
+1. Instale as dependencias:
 
 ```bash
 npm install
 ```
 
-### 2. Rodar o bot
+1. Configure variaveis de ambiente:
 
 ```bash
-npm start          # Produção
-npm run dev        # Desenvolvimento (auto-reload)
-npm run check      # Verificar sintaxe
+cp .env.example .env
 ```
 
-### 3. Primeira execução
-
-Na primeira execução, **escaneie o QR code** no terminal com seu WhatsApp.
-
-### 4. Variáveis de ambiente (opcional)
+1. Suba o bot:
 
 ```bash
-BOT_ADMIN_GROUP_ID="1203630xxxxxxxxx@g.us" npm start
+npm start
 ```
 
-Veja [.env.example](.env.example) para todas as variáveis.
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-G_aBot/
-├── 📄 gabot_ofertas.js          # Arquivo principal
-├── 📄 ecosystem.config.cjs       # Configuração PM2
-│
-├── 📂 src/
-│   ├── 📂 bot/                   # Lógica do bot WhatsApp
-│   │   ├── whatsapp.js          # Conexão Baileys
-│   │   ├── commands.js          # Comandos de usuário ✨ ATUALIZADO
-│   │   ├── adminCommands.js     # Comandos de admin ✨ ATUALIZADO
-│   │   ├── commandParser.js     # ✨ NOVO: Parser moderno
-│   │   ├── batchProcessor.js    # ✨ NOVO: Processador de lote
-│   │   ├── menuTemplates.js     # ✨ NOVO: 27 templates de UI
-│   │   ├── matching.js          # Match entre filtros e mensagens
-│   │   └── unmappedMessageHandler.js
-│   │
-│   ├── 📂 db/
-│   │   ├── repo.js              # CRUD de dados
-│   │   └── schema.js            # Estrutura do banco
-│   │
-│   ├── 📂 services/
-│   │   ├── couponExtractor.js   # Extração de cupons
-│   │   ├── aiCouponParser.js    # Validação com IA
-│   │   ├── messageLogger.js     # Log de mensagens
-│   │   ├── backupService.js     # Backup automático
-│   │   └── ollamaManager.js     # Gerenciamento Ollama
-│   │
-│   ├── 📂 utils/
-│   │   ├── text.js              # Normalização de texto
-│   │   └── queue.js             # Fila de envio
-│   │
-│   └── config.js
-│
-├── 📂 auth_info/                # Credenciais WhatsApp (gitignored)
-├── 📂 data/
-│   ├── bot.db                   # Banco SQLite
-│   ├── 📂 logs/                 # Logs estruturados
-│   └── 📂 backups/              # Backups automáticos
-│
-├── 📄 BEST_PRACTICES.md         # Guia de padrões de código
-├── 📄 OLLAMA_SETUP.md           # Setup de IA local (Ollama)
-└── 📄 MODELOS_RECOMENDADOS.md   # Modelos indicados por hardware
-```
-
----
-
-## 🎯 Comandos de Usuário
-
-### ✨ Novos Prefixos (Redesign v0.2.0)
-
-| Prefixo | Função | Exemplo | Suporta Lote? |
-|---------|--------|---------|---------------|
-| `+` | Adicionar filtro | `+ notebook, mouse` | ✅ Sim |
-| `-` | Remover filtro | `- teclado` | ✅ Sim |
-| `?` | Buscar cupom | `? amazon` | ✅ Sim |
-| `!` | Enviar sugestão | `! melhorar isso` | ❌ Não |
-| `.` | Chat com IA | `. qual é melhor?` | ❌ Não |
-| `g` | Sugerir grupo | `g chat.whatsapp.com/...` | ❌ Não |
-
-### 📌 Atalhos Rápidos
-
-| Comando | Função |
-|---------|--------|
-| `list` ou `filtros` | Listar seus filtros ativos |
-| `now` ou `cupons` | Ver cupons recentes |
-| `seguir [loja]` | Receber alertas da loja |
-| `parar [loja]` | Parar de receber alertas |
-| `lojas` | Ver lojas que você segue |
-| `alerta compacto` | Receber alerta de cupom resumido |
-| `alerta detalhado` | Voltar ao alerta completo |
-| `help` | Ver guia completo |
-| `/menu` | Menu principal |
-
-### 🔄 Comandos Legacy (ainda funcionam 100%)
-
-```
-c1-12             # Sequencial global
-cf1, cf2, cf3     # Filtros
-cc1-5             # Cupons
-cs1, cs2          # Sugestões
-
-/add, /remover, /meusfiltros, /cupons, etc.
-```
-
----
-
-## 👮 Comandos de Admin
-
-### ✨ Novos Comandos Simplificados
-
-| Comando | Função | Exemplos |
-|---------|--------|----------|
-| `ok [id]` | Aprovar sugestão | `ok g1` ou `ok g1,g2,g3` ou `ok g*` |
-| `no [id]` | Rejeitar sugestão | `no s1` ou `no s*` |
-| `stats` | Status do bot | `stats` |
-| `ia` | Menu Ollama | `ia` |
-| `ia reset [modelo]` | Reiniciar modelo | `ia reset ollama` |
-
-### 🎛️ Menu Admin
-
-```
-/adm                      # Menu principal
-ok [id]                   # Aprovar (novo)
-no [id]                   # Rejeitar (novo)
-stats                     # Status (novo)
-ia                        # Menu IA (novo)
-adm2 ou /adm sugestoes   # Listar sugestões (legacy)
-```
-
----
-
-## 📊 Exemplos de Uso
-
-### Usuário Comum
-
-**Antes (Antigo):**
-```
-c3 notebook
-c3 mouse
-c3 teclado
-```
-
-**Depois (Novo):**
-```
-+ notebook, mouse, teclado
-```
-
-### Administrador
-
-**Antes (Antigo):**
-```
-adm5 g1
-adm5 g2
-adm5 g3
-```
-
-**Depois (Novo - com lote):**
-```
-ok g1,g2,g3
-```
-
-**Depois (Novo - com wildcard):**
-```
-ok g*     # Aprova TODOS os grupos
-no s*     # Rejeita TODAS as sugestões gerais
-```
-
----
-
-## 🔧 Responsabilidades dos Módulos
-
-### `src/bot/` - Núcleo do Bot
-
-| Arquivo | Responsabilidade |
-|---------|------------------|
-| **whatsapp.js** | Inicializa Baileys, gerencia eventos (mensagens, conexão) |
-| **commands.js** | Processa comandos de usuários com novos prefixos |
-| **adminCommands.js** | Comandos de admin com novos atalhos simplificados |
-| **commandParser.js** | ✨ NEW: Parse moderno com suporte a prefixos |
-| **batchProcessor.js** | ✨ NEW: Processa lotes com vírgula e wildcards |
-| **menuTemplates.js** | ✨ NEW: 27 templates de mensagem centralizados |
-| **matching.js** | Valida match entre filtros e mensagens |
-| **unmappedMessageHandler.js** | Armazena mensagens desconhecidas |
-
-### `src/db/` - Persistência
-
-- **repo.js**: Operações CRUD (Repository pattern)
-- **schema.js**: Estrutura das tabelas (users, keywords, coupons, logs)
-
-### `src/services/` - Integrações Externas
-
-- **couponExtractor.js**: Extrai cupons via regex
-- **aiCouponParser.js**: Valida cupons com IA (Ollama)
-- **messageLogger.js**: Log estruturado em JSON
-- **backupService.js**: Backup automático do banco
-- **ollamaManager.js**: Gerencia servidor Ollama
-
-### `src/utils/` - Utilitários
-
-- **text.js**: Normalização, hash, detecção de tipos
-- **queue.js**: Fila com throttle para envio
-
----
-
-## 📚 Documentação Essencial
-
-- [BEST_PRACTICES.md](BEST_PRACTICES.md) - Padrões de código e manutenção.
-- [OLLAMA_SETUP.md](OLLAMA_SETUP.md) - Instalação e configuração do Ollama.
-- [MODELOS_RECOMENDADOS.md](MODELOS_RECOMENDADOS.md) - Escolha de modelos conforme hardware.
-
----
-
-## ⚙️ Configuração
-
-### Variáveis de Ambiente
-
-Crie um arquivo `.env` com base em `.env.example`:
-
-```env
-# Opcional - ID do grupo admin para notificações
-BOT_ADMIN_GROUP_ID=XXXXXXXXXXXX@g.us
-
-# Opcional - Porta do Ollama
-OLLAMA_PORT=11434
-OLLAMA_HOST=http://localhost:11434
-```
-
-### PM2 (Produção)
+Atalhos uteis:
 
 ```bash
-npm run pm2:start      # Iniciar
-npm run pm2:stop       # Parar
-npm run pm2:restart    # Reiniciar
-npm run pm2:logs       # Ver logs
-npm run pm2:status     # Ver status
+npm run dev
+npm run check
+npm run test
 ```
 
----
-
-## 🎬 Fluxo de Operação
-
-```
-WhatsApp (Baileys)
-       ↓
-whatsapp.js (Event Handler)
-       ↓
-    [Tipo de Mensagem?]
-       ├→ Privado → commandParser.js → commands.js
-       ├→ Grupo → matching.js → couponExtractor.js → Usuário
-       └→ Admin → adminCommands.js
-       ↓
-    [Valida & Database]
-       ↓
-    [Log & Backup]
-       ↓
-    Resposta para usuário
-```
-
----
-
-## 🔗 Fluxo de Novos Comandos (v0.2.0)
-
-```
-Entrada: "+ notebook, mouse, teclado"
-    ↓
-commandParser.js (Detecta prefixo "+")
-    ↓
-batchProcessor.js (Split por vírgula)
-    ↓
-Processa cada item via repo.js
-    ↓
-menuTemplates.js (Formata resposta)
-    ↓
-Retorna: "✅ 3 filtro(s) adicionado(s)"
-```
-
----
-
-## 📊 Arquivos de Dados
-
-### `auth_info/` (Gitignored)
-Credenciais do Baileys (não commitr!)
-
-### `data/bot.db`
-Banco de dados SQLite com:
-- Usuários e filtros
-- Cupons encontrados
-- Histórico de sugestões
-
-### `data/logs/`
-Logs estruturados em JSON (auditoria)
-
-### `data/backups/`
-Backups automáticos diários
-
----
-
-## 🚀 Deploy em Produção
-
-### Com PM2
+Scripts especificos do modulo Jornal:
 
 ```bash
-# Instalar PM2 globalmente
-npm install -g pm2
+npm run check:jornal
+npm run test:jornal
+npm run build:jornal-categorias
+```
 
-# Iniciar com PM2
+PM2:
+
+```bash
 npm run pm2:start
-
-# Ver logs em tempo real
+npm run pm2:stop
+npm run pm2:restart
 npm run pm2:logs
-
-# Restartar automaticamente
-pm2 startup
-pm2 save
+npm run pm2:status
 ```
 
-### Com Docker (Opcional)
+## Configuracao (.env)
 
-```bash
-docker build -t gabot .
-docker run -d --name gabot gabot
+Baseie-se em .env.example. Variaveis principais:
+
+## Bot/Admin
+
+- BOT_ADMIN_GROUP_ID: grupo admin para notificacoes
+- BOT_ALLOW_SYSTEM_REBOOT: libera reboot via comando admin sys
+- BOT_ALLOW_SUDO_COMMANDS: libera comandos com sudo via admin sys
+- BOT_SUDO_PASSWORD: senha para comandos sudo no fluxo admin
+
+## IA (Ollama)
+
+- COUPON_AI_ENABLED
+- COUPON_AI_BASE_URL
+- COUPON_AI_MODEL
+- COUPON_AI_TIMEOUT
+- OLLAMA_AUTO_START
+- OLLAMA_AUTO_PULL_MODELS
+- OLLAMA_FALLBACK_MODELS
+- OLLAMA_DEFAULT_INSTANCE
+- OLLAMA_LOCAL_START_COMMAND
+- OLLAMA_LOCAL_STOP_COMMAND
+- OLLAMA_LOCAL_RESTART_COMMAND
+- OLLAMA_INSTANCES_JSON
+
+## Jornal/retencao
+
+- JORNAL_SCHEDULER_INTERVAL_MS (intervalo do scheduler)
+- JORNAL_PDF_CACHE_TTL_MS (cache de PDF)
+- PROCESSED_OFFERS_TTL_DAYS (limpeza de dados processados)
+
+Variaveis de teste do jornal (uso tecnico):
+
+- JORNAL_TEST_PAGE_SAMPLING
+- JORNAL_TEST_PAGE_SAMPLING_RETRY_RANDOM
+- JORNAL_TEST_GEOMETRIC_FALLBACK
+
+## Estrutura do Projeto (resumo)
+
+```text
+G_aBot/
+├── gabot_ofertas.js              # bootstrap principal
+├── ecosystem.config.cjs          # PM2
+├── .env.example
+├── src/
+│   ├── bot/
+│   │   ├── whatsapp.js           # conexao/eventos Baileys
+│   │   ├── commands.js           # comandos privados de usuario
+│   │   ├── adminCommands.js      # comandos admin
+│   │   ├── commandParser.js      # parser moderno (+ - ? ! . g)
+│   │   ├── menuTemplates.js      # menus/textos padronizados
+│   │   └── ...
+│   ├── db/
+│   │   ├── schema.js
+│   │   ├── repo.js
+│   │   ├── offersRepo.js
+│   │   └── migrationRunner.js
+│   ├── services/
+│   │   ├── journalService.js
+│   │   ├── journalScheduler.js
+│   │   ├── pdfExtractor.js
+│   │   ├── couponExtractor.js
+│   │   ├── aiCouponParser.js
+│   │   └── ...
+│   └── config.js
+├── auth_info/                    # sessao do WhatsApp (nao versionar)
+├── data/
+│   ├── bot.db
+│   ├── logs/
+│   ├── backups/
+│   └── pdfs/
+└── docs/
 ```
 
----
+## Menus e Itens Que o Bot Faz Hoje
 
-## 🐛 Troubleshooting
+## Menu principal (usuario)
 
-### "QR Code não aparece"
-- Verifique se terminal suporta imagens (iTerm2, Windows Terminal)
-- Tente em outro terminal
+Comando: menu ou /menu
 
-### "Bot desconecta frequently"
-- Aumente timeout em `config.js`
-- Verifique conexão de internet
-- Veja `/data/logs/` para detalhes
+Itens do menu atual:
 
-### "Cupons não são encontrados"
-- Verifique regex em `couponExtractor.js`
-- Teste com mensagens conhecidas
-- Habilite modo debug em `config.js`
+- Filtros: + termo, + termo ate 3500, - termo, limpar, filtros
+- Cupons: now, ? loja, seguir loja, lojas, compacto
+- Outros: ! texto, g link, /jornal
+- Ajuda completa: help
 
----
+## Menu de ajuda (usuario)
 
-## 📈 Estatísticas do Projeto
+Comando: help ou /help
 
-| Métrica | Valor |
-|---------|-------|
-| Arquivos de Código | 13 |
-| Funcções Exportadas | 100+ |
-| Linha de Código | 5000+ |
-| Documentação | Enxuta e objetiva |
-| Status | 🟢 Produção |
+Abrange:
 
----
+- Filtros com lote (ex.: + item1, item2)
+- Filtros com preco maximo (ex.: + item ate 3500)
+- Cupons e lojas seguidas
+- Modos de alerta (compacto e detalhado)
+- Comandos de colaboracao (! e g)
+- Compatibilidade legada (c1..c12, cf, cc, cs e comandos com /)
 
-## 📝 Changelog
+## Menu admin
 
-### v0.2.0 (9 Mar 2026) - ✨ REDESIGN
-- ✨ Novos prefixos: +, -, ?, !, ., g
-- ✨ Suporte a lote (vírgula-separado)
-- ✨ Wildcards para admin (ok g*, no s*)
-- ✨ 27 templates de UI centralizados
-- ✨ Parser moderno (commandParser.js)
-- ✨ Processador de lote (batchProcessor.js)
-- ✅ 100% compatibilidade com legacy
-- 📚 Documentação consolidada no README + guias essenciais
+Comando: /adm (ou aliases adm*)
 
-### v0.1.0 (Initial)
-- Versão inicial com comandos básicos
+Itens do painel admin:
 
----
+- Gestao de fila: ok [id], no [id], adm2/ok ? para pendencias
+- IA/Ollama: ia, ia reset [nome], . [pergunta]
+- Sistema: stats, logs, gruposbot, sys help, sys ls, sys bot restart, sys confirmar
+- Jornal: jornal ultimas, jornal buscar, jornal historico, jornal observar, jornal termos, jornal status
 
-## 🤝 Contribuindo
+## Comandos de Usuario (atuais)
 
-1. Leia [BEST_PRACTICES.md](BEST_PRACTICES.md)
-2. Crie uma branch para sua feature
-3. Commit com mensagens claras
-4. Abra um PR
+## Prefixos rapidos
 
----
+- - termo: adicionar filtro
+- - termo ate 3500 ou + termo <= 3500: filtro com preco maximo
+- - termo: remover filtro
+- ? loja: buscar cupom por loja
+- ! texto: enviar sugestao geral
+- g link: sugerir grupo de WhatsApp
 
-## 📞 Suporte
+## Atalhos/comandos de uso diario
 
-- **Dúvida sobre código?** → Veja [BEST_PRACTICES.md](BEST_PRACTICES.md)
-- **Configurar IA local?** → Veja [OLLAMA_SETUP.md](OLLAMA_SETUP.md)
-- **Bug encontrado?** → Abra uma issue com detalhes
+- filtros ou list: listar filtros
+- limpar ou /limparfiltros: remover todos os filtros
+- now ou cupons: cupons recentes
+- seguir [loja]: seguir cupons da loja
+- parar [loja]: parar de seguir loja
+- lojas: listar lojas seguidas
+- alerta compacto ou compacto: modo de alerta resumido
+- alerta detalhado ou detalhado: modo completo
+- /jornal [query]: consultar ofertas do jornal
 
----
+## Comandos do Jornal para Usuario (chat privado)
 
-## 📄 Licença
+- /jornal: ultimas ofertas
+- /jornal categorias: lista categorias
+- /jornal categoria [nome|indice]: filtra por categoria
+- /jornal [categoria]: atalho para categoria
+- /jornal [termo]: busca por nome de produto
+- /jornal todas: lista ampliada (ultimos 7 dias)
 
-MIT - Veja LICENSE para detalhes
+## Comandos de Admin (atuais)
 
----
+## Moderacao de sugestoes
 
-**Mantido com ❤️ por ApénasGabs**  
-Última atualização: 9 de março de 2026 (v0.2.0)
+- ok g1 / ok s1: aprova sugestao
+- no g1 / no s1: rejeita sugestao
+- Lote: ok g1,g2,g3 e no s1,s2
+- Wildcard: ok g*e no s*
+
+## Operacao e diagnostico
+
+- stats: status geral
+- logs: ultimos logs
+- gruposbot: grupos onde o bot participa
+- sys [acao]: controle de terminal com confirmacao
+
+## IA
+
+- ia: menu/status das instancias
+- ia status [nome]
+- ia reset [nome]
+- . [pergunta]: pergunta direta para IA
+
+## Jornal (admin)
+
+- jornal ultimas [n]
+- jornal todas [n]
+- jornal categorias
+- jornal categoria [nome]
+- jornal buscar [termo]
+- jornal historico [id]
+- jornal observar [termo]
+- jornal parar [id]
+- jornal termos
+- jornal atualizar
+- jornal status
+- jornal limpar confirmar
+
+## Comandos Legados Mantidos
+
+Compatibilidade ativa com atalhos e comandos antigos:
+
+- c1..c12
+- cf1..cf3
+- cc1..cc5
+- cs1..cs2
+- aliases admin adm0..adm20
+
+## Fluxo de Operacao
+
+1. whatsapp.js recebe evento de mensagem.
+2. Mensagem privada vai para commandParser.js e commands.js.
+3. Mensagem admin cai em adminCommands.js.
+4. Mensagens de grupos/canais passam por matching + extracao de cupom.
+5. Persistencia em SQLite (repo/offersRepo).
+6. Logs estruturados e backup automatico.
+7. Scheduler do jornal roda periodicamente e atualiza base de ofertas.
+
+## Banco e Dados Gerados
+
+- data/bot.db: usuarios, filtros, cupons, sugestoes, ofertas/historico
+- data/logs: logs por contexto
+- data/backups: backups do SQLite
+- data/pdfs: PDFs baixados para processamento
+- auth_info: credenciais de sessao do WhatsApp
+
+## Documentacao Complementar
+
+- BEST_PRACTICES.md
+- OLLAMA_SETUP.md
+- MODELOS_RECOMENDADOS.md
+- docs/JORNAL_OFERTAS.md
+
+## Troubleshooting Rapido
+
+## QR nao aparece
+
+- confira se o terminal permite renderizacao adequada
+- reinicie o processo e verifique se a sessao em auth_info esta consistente
+
+## Jornal sem resultados
+
+- execute jornal atualizar (admin)
+- valide conectividade com origem do jornal
+- confira logs em data/logs
+
+## IA nao responde
+
+- confirme COUPON_AI_ENABLED=true
+- valide COUPON_AI_BASE_URL e modelo
+- teste comando admin ia status
+
+## Licenca
+
+MIT

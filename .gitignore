@@ -3,9 +3,10 @@
 .baileys_auth_gabot_ofertas/
 node_modules
 scrap*
+2*
 # Environment variables
 .env
-
+*.pdf
 # Baileys auth directories
 .baileys_auth*
 auth_info/
