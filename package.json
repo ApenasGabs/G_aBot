@@ -16,7 +16,7 @@
   "keywords": [],
   "type": "module",
   "main": "gabot_ofertas.js",
-  "repository": "https://github.com/Apenasgabs/1st.Crawler.git",
+  "repository": "https://github.com/Apenasgabs/g_bot.git",
   "author": "Apenasgabs <Gabers357@gmail.com>",
   "license": "MIT",
   "dependencies": {

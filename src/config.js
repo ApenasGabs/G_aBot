@@ -8,7 +8,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 
 dotenv.config({ path: path.join(ROOT_DIR, ".env"), quiet: true });
 
-function buildOllamaInstances() {
+const buildOllamaInstances = () => {
   const defaultBaseUrl = process.env.COUPON_AI_BASE_URL || "http://localhost:11434";
 
   const defaultInstances = {
@@ -45,7 +45,7 @@ function buildOllamaInstances() {
     console.log("OLLAMA_INSTANCES_JSON invalido. Usando configuracao padrao.");
     return defaultInstances;
   }
-}
+};
 
 export const PATHS = {
   root: ROOT_DIR,
@@ -65,6 +65,7 @@ export const BOT_CONFIG = {
   allowSystemReboot: process.env.BOT_ALLOW_SYSTEM_REBOOT === "true",
   allowSudoCommands: process.env.BOT_ALLOW_SUDO_COMMANDS === "true",
   sudoPassword: process.env.BOT_SUDO_PASSWORD || "",
+  logsEnabled: process.env.BOT_LOGS_ENABLED !== "false",
   ollamaAutoStart: process.env.OLLAMA_AUTO_START !== "false",
   ollamaAutoPullModels: process.env.OLLAMA_AUTO_PULL_MODELS !== "false",
   ollamaFallbackModels: (process.env.OLLAMA_FALLBACK_MODELS || "qwen2.5:1.5b,llama3.2:1b,gemma2:2b")
