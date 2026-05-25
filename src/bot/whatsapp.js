@@ -3,6 +3,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
+import pino from "pino";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
 import {
@@ -21,6 +22,8 @@ import { handlePrivateCommand } from "./commands.js";
 import { buildCouponAlertMessage } from "./couponAlertMessage.js";
 import { findMatches } from "./matching.js";
 import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
+
+const baileysLogger = pino({ level: "silent" });
 
 const formatCurrencyBRL = (cents) => {
   if (!Number.isFinite(cents) || cents <= 0) return "R$ 0,00";
@@ -48,9 +51,15 @@ export async function initWhatsappBot({
     client = makeWASocket({
       auth: state,
       version,
+      logger: baileysLogger,
       printQRInTerminal: false,
       markOnlineOnConnect: false,
       browser: BOT_CONFIG.browserIdentity,
+      syncFullHistory: false,
+      fireInitQueries: false,
+      shouldSyncHistoryMessage: () => false,
+      shouldIgnoreJid: (jid) => jid?.endsWith("@broadcast"),
+      getMessage: async () => undefined,
     });
 
     const dispatchQueue = createDispatchQueue(async (job) => {
