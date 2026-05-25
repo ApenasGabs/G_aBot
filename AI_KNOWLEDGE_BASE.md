@@ -97,6 +97,9 @@ CRASH_PREVENTION (gabot_ofertas.js):
 - A stack trace eh truncada em 500 caracteres para respeitar limites do WhatsApp.
 
 FILTRO_MENSAGENS_ANTIGAS (whatsapp.js - messages.upsert):
+- O handler aceita TANTO type "notify" (tempo real) QUANTO "append" (offline/reconexao).
+  IMPORTANTE: mensagens offline chegam como "append", NAO como "notify".
+  Filtrar apenas "notify" faz o bot ignorar mensagens de grupos apos reconexao.
 - SE chatId terminar com "@g.us" (grupo),
   ENTAO comparar messageTimestamp com timestamp atual.
 - SE diferenca > 60 segundos, logar aviso e pular (continue).
@@ -105,7 +108,8 @@ FILTRO_MENSAGENS_ANTIGAS (whatsapp.js - messages.upsert):
 OTIMIZACAO_SOCKET (whatsapp.js - makeWASocket):
 - logger: pino level "silent" -> elimina output de chaves de sessao e buffers.
 - syncFullHistory: false -> impede download de historico do celular.
-- fireInitQueries: false -> desativa queries iniciais de sincronizacao.
+- fireInitQueries: true (padrao) -> MANTER ATIVO, controla apenas fetchProps/fetchBlocklist/fetchPrivacySettings.
+  Desativar nao reduz flood de mensagens e pode causar problemas com metadata.
 - shouldSyncHistoryMessage: () => false -> rejeita cada notificacao de history sync.
 - shouldIgnoreJid: jid @broadcast -> ignora JIDs de status, evita descriptografia.
 - getMessage: async () => undefined -> impede loops em retry de mensagens corrompidas.
@@ -119,6 +123,7 @@ OTIMIZACAO_SOCKET (whatsapp.js - makeWASocket):
   - Todos os outros erros criticos sao logados e notificados no grupo admin do WhatsApp com timestamp, mensagem e stack trace.
 
 - **Filtro de Mensagens Antigas**:
+  - O handler aceita mensagens de tipo `"notify"` (tempo real) e `"append"` (offline/reconexao).
   - Mensagens de grupo com mais de 60 segundos de atraso sao descartadas antes do processamento.
   - Mensagens privadas NAO sao filtradas (sempre processadas independente do timestamp).
   - O filtro atua APOS o Baileys descriptografar, mas ANTES do processamento de comandos/cupons.
@@ -126,14 +131,16 @@ OTIMIZACAO_SOCKET (whatsapp.js - makeWASocket):
 - **Otimizacao do Socket Baileys**:
   - Logger interno silenciado — elimina blocos de `<Buffer...>`, `SessionEntry` e chaves criptograficas do PM2.
   - History sync bloqueado em duas camadas: `syncFullHistory: false` e `shouldSyncHistoryMessage: () => false`.
-  - Init queries desativadas para reduzir carga inicial na reconexao.
+  - `fireInitQueries` mantido como `true` (padrao) — controla apenas metadata inofensiva, NAO o flood de mensagens.
   - JIDs de broadcast ignorados, evitando descriptografar mensagens de status desnecessarias.
 
 ### Checklist de Aceite
 
 - [x] Handlers `uncaughtException` e `unhandledRejection` adicionados em `gabot_ofertas.js` com filtro para erro JSON do Baileys.
 - [x] Funcao `notifyAdminError` envia erros criticos ao grupo admin com stack trace truncada.
+- [x] Handler `messages.upsert` aceita tanto `type: "notify"` quanto `type: "append"` para nao ignorar mensagens offline.
 - [x] Filtro de mensagens antigas (>60s) implementado no `messages.upsert` para grupos.
 - [x] Logger do Baileys configurado como `silent` via pino.
-- [x] `syncFullHistory`, `fireInitQueries`, `shouldSyncHistoryMessage`, `shouldIgnoreJid` e `getMessage` configurados no `makeWASocket`.
+- [x] `syncFullHistory`, `shouldSyncHistoryMessage`, `shouldIgnoreJid` e `getMessage` configurados no `makeWASocket`.
+- [x] `fireInitQueries` mantido como padrao (`true`) — desativa-lo nao ajuda no flood e pode causar regressoes.
 - [x] Todos os 41 testes da aplicacao passam com sucesso.

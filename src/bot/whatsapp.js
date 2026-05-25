@@ -56,7 +56,7 @@ export async function initWhatsappBot({
       markOnlineOnConnect: false,
       browser: BOT_CONFIG.browserIdentity,
       syncFullHistory: false,
-      fireInitQueries: false,
+
       shouldSyncHistoryMessage: () => false,
       shouldIgnoreJid: (jid) => jid?.endsWith("@broadcast"),
       getMessage: async () => undefined,
@@ -144,7 +144,8 @@ export async function initWhatsappBot({
     });
 
     client.ev.on("messages.upsert", async ({ messages, type }) => {
-      if (!ready || type !== "notify") return;
+      if (!ready) return;
+      if (type !== "notify" && type !== "append") return;
 
       for (const msg of messages) {
         if (!msg.message || msg.key.fromMe) continue;
