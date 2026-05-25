@@ -8,7 +8,62 @@ import { getAIConfig, isAIEnabled } from "./src/services/aiCouponParser.js";
 import { startBackupScheduler } from "./src/services/backupService.js";
 import { ensureOllamaOnline, getOllamaInstanceStatus } from "./src/services/ollamaManager.js";
 
+const BAILEYS_JSON_ERROR_PATTERN = "Unexpected non-whitespace character after JSON";
+const ERROR_STACK_MAX_LENGTH = 500;
+
 let wppClient = null;
+
+/**
+ * Envia notificacao de erro critico ao grupo admin via WhatsApp
+ *
+ * @param {string} origin - Origem do erro (ex: "uncaughtException")
+ * @param {Error | unknown} error - O erro capturado
+ */
+const notifyAdminError = (origin, error) => {
+  if (!wppClient || !BOT_CONFIG.adminGroupId) return;
+
+  const timestamp = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+  });
+
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const errorStack = error instanceof Error && error.stack
+    ? error.stack.substring(0, ERROR_STACK_MAX_LENGTH)
+    : "Stack indisponivel";
+
+  const text = [
+    `[ERRO CRITICO] ${origin}`,
+    `Horario: ${timestamp}`,
+    `Mensagem: ${errorMessage}`,
+    "",
+    `Stack:\n${errorStack}`,
+  ].join("\n");
+
+  wppClient
+    .sendMessage(BOT_CONFIG.adminGroupId, { text })
+    .catch((sendError) => {
+      console.error("Falha ao notificar grupo admin sobre erro critico:", sendError.message);
+    });
+};
+
+process.on("uncaughtException", (error) => {
+  if (error instanceof SyntaxError && error.message.includes(BAILEYS_JSON_ERROR_PATTERN)) {
+    console.warn("[AVISO] No offline ignorado (JSON malformado do Baileys):", error.message);
+    return;
+  }
+  console.error("[uncaughtException]", error);
+  notifyAdminError("uncaughtException", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (message.includes(BAILEYS_JSON_ERROR_PATTERN)) {
+    console.warn("[AVISO] Rejeicao de no offline ignorada (JSON malformado do Baileys):", message);
+    return;
+  }
+  console.error("[unhandledRejection]", reason);
+  notifyAdminError("unhandledRejection", reason);
+});
 
 async function notifyShutdown() {
   if (wppClient && BOT_CONFIG.adminGroupId) {

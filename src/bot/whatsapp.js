@@ -142,6 +142,22 @@ export async function initWhatsappBot({
 
         const chatId = msg.key.remoteJid ?? "";
         const isGroup = chatId.endsWith("@g.us");
+
+        if (isGroup) {
+          const messageTimestamp = typeof msg.messageTimestamp === "number"
+            ? msg.messageTimestamp
+            : Number(msg.messageTimestamp);
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          const MESSAGE_AGE_LIMIT_SECONDS = 60;
+
+          if (nowSeconds - messageTimestamp > MESSAGE_AGE_LIMIT_SECONDS) {
+            console.warn(
+              `[AVISO] Mensagem antiga ignorada (grupo ${chatId}, atraso de ${nowSeconds - messageTimestamp}s)`
+            );
+            continue;
+          }
+        }
+
         const isBroadcast = chatId.endsWith("@broadcast");
         const isNewsletter = chatId.endsWith("@newsletter");
         const isMonitoredChannel = isGroup || isNewsletter;
