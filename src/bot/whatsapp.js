@@ -153,7 +153,7 @@ export async function initWhatsappBot({
         const chatId = msg.key.remoteJid ?? "";
         const isGroup = chatId.endsWith("@g.us");
 
-        if (isGroup) {
+        if (isGroup && chatId !== BOT_CONFIG.adminGroupId) {
           const messageTimestamp = typeof msg.messageTimestamp === "number"
             ? msg.messageTimestamp
             : Number(msg.messageTimestamp);

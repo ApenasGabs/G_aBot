@@ -100,7 +100,7 @@ FILTRO_MENSAGENS_ANTIGAS (whatsapp.js - messages.upsert):
 - O handler aceita TANTO type "notify" (tempo real) QUANTO "append" (offline/reconexao).
   IMPORTANTE: mensagens offline chegam como "append", NAO como "notify".
   Filtrar apenas "notify" faz o bot ignorar mensagens de grupos apos reconexao.
-- SE chatId terminar com "@g.us" (grupo),
+- SE chatId terminar com "@g.us" (grupo) E o grupo NAO for o BOT_CONFIG.adminGroupId,
   ENTAO comparar messageTimestamp com timestamp atual.
 - SE diferenca > 60 segundos, logar aviso e pular (continue).
 - O timestamp do Baileys pode ser number ou Long (protobuf), ambos sao tratados.
@@ -125,7 +125,7 @@ OTIMIZACAO_SOCKET (whatsapp.js - makeWASocket):
 - **Filtro de Mensagens Antigas**:
   - O handler aceita mensagens de tipo `"notify"` (tempo real) e `"append"` (offline/reconexao).
   - Mensagens de grupo com mais de 60 segundos de atraso sao descartadas antes do processamento.
-  - Mensagens privadas NAO sao filtradas (sempre processadas independente do timestamp).
+  - Mensagens privadas e mensagens do **grupo de admin** NAO sao filtradas (sempre processadas independente do timestamp).
   - O filtro atua APOS o Baileys descriptografar, mas ANTES do processamento de comandos/cupons.
 
 - **Otimizacao do Socket Baileys**:
@@ -139,7 +139,7 @@ OTIMIZACAO_SOCKET (whatsapp.js - makeWASocket):
 - [x] Handlers `uncaughtException` e `unhandledRejection` adicionados em `gabot_ofertas.js` com filtro para erro JSON do Baileys.
 - [x] Funcao `notifyAdminError` envia erros criticos ao grupo admin com stack trace truncada.
 - [x] Handler `messages.upsert` aceita tanto `type: "notify"` quanto `type: "append"` para nao ignorar mensagens offline.
-- [x] Filtro de mensagens antigas (>60s) implementado no `messages.upsert` para grupos.
+- [x] Filtro de mensagens antigas (>60s) implementado no `messages.upsert` para grupos (grupo admin é isento).
 - [x] Logger do Baileys configurado como `silent` via pino.
 - [x] `syncFullHistory`, `shouldSyncHistoryMessage`, `shouldIgnoreJid` e `getMessage` configurados no `makeWASocket`.
 - [x] `fireInitQueries` mantido como padrao (`true`) — desativa-lo nao ajuda no flood e pode causar regressoes.
