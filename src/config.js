@@ -81,3 +81,9 @@ export const BACKUP_CONFIG = {
   maxFiles: 30,
   processedOffersTtlDays: parseInt(process.env.PROCESSED_OFFERS_TTL_DAYS || "7", 10),
 };
+
+export const SUPABASE_CONFIG = {
+  url: process.env.SUPABASE_URL || "",
+  key: process.env.SUPABASE_KEY || "",
+  debounceMs: 5 * 60 * 1000, // 5 minutos de debounce
+};

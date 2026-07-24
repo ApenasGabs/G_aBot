@@ -7,6 +7,7 @@ import { setupDatabase } from "./src/db/schema.js";
 import { getAIConfig, isAIEnabled } from "./src/services/aiCouponParser.js";
 import { startBackupScheduler } from "./src/services/backupService.js";
 import { ensureOllamaOnline, getOllamaInstanceStatus } from "./src/services/ollamaManager.js";
+import { syncFromSupabaseOnBoot } from "./src/services/supabaseSync.js";
 
 const BAILEYS_JSON_ERROR_PATTERN = "Unexpected non-whitespace character after JSON";
 const ERROR_STACK_MAX_LENGTH = 500;
@@ -95,6 +96,7 @@ async function main() {
   setupDatabase(db);
 
   const repo = createRepo(db);
+  await syncFromSupabaseOnBoot(repo);
   const normalizedStats = repo.normalizeStoredKeywords();
   if (normalizedStats.removedDuplicates > 0) {
     console.log(
