@@ -1,4 +1,5 @@
 import { normalizeText } from "../utils/text.js";
+import { triggerDebouncedSync } from "../services/supabaseSync.js";
 
 export function createRepo(db) {
   const normalizeAlertMode = (mode) => {
@@ -445,10 +446,75 @@ export function createRepo(db) {
     LIMIT ?
   `);
 
-  return {
+  const getUserRawStmt = db.prepare('SELECT * FROM users WHERE chat_id = ? LIMIT 1');
+  const listKeywordsRawStmt = db.prepare('SELECT * FROM keywords WHERE user_id = ?');
+  const listCouponInterestsRawStmt = db.prepare('SELECT * FROM coupon_interests WHERE user_id = ?');
+  const countUsersStmt = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1');
+  
+  const clearAllKeywordsStmt = db.prepare('DELETE FROM keywords');
+  const clearAllInterestsStmt = db.prepare('DELETE FROM coupon_interests');
+  
+  const clearUserKeywordsStmt = db.prepare('DELETE FROM keywords WHERE user_id = ?');
+  const clearUserInterestsStmt = db.prepare('DELETE FROM coupon_interests WHERE user_id = ?');
+  
+  const insertUserRawStmt = db.prepare(`
+    INSERT INTO users (chat_id, name, is_active, alert_mode, created_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(chat_id) DO UPDATE SET
+      name = excluded.name,
+      is_active = excluded.is_active,
+      alert_mode = excluded.alert_mode
+  `);
+  
+  const insertKeywordRawStmt = db.prepare(`
+    INSERT INTO keywords (user_id, term, term_normalized, max_price_cents)
+    VALUES (?, ?, ?, ?)
+  `);
+  
+  const insertInterestRawStmt = db.prepare(`
+    INSERT INTO coupon_interests (user_id, store_name, store_normalized)
+    VALUES (?, ?, ?)
+  `);
+
+  const bulkSyncTx = db.transaction((users, keywords, interests) => {
+    clearAllInterestsStmt.run();
+    clearAllKeywordsStmt.run();
+    
+    for (const u of users) {
+      insertUserRawStmt.run(u.chat_id, u.name, u.is_active, u.alert_mode || 'full', u.created_at);
+    }
+    for (const k of keywords) {
+      insertKeywordRawStmt.run(k.user_id, k.term, k.term_normalized, k.max_price_cents);
+    }
+    for (const i of interests) {
+      insertInterestRawStmt.run(i.user_id, i.store_name, i.store_normalized);
+    }
+  });
+  
+  const syncUserTx = db.transaction((user, keywords, interests) => {
+    insertUserRawStmt.run(user.chat_id, user.name, user.is_active, user.alert_mode || 'full', user.created_at);
+    clearUserInterestsStmt.run(user.chat_id);
+    clearUserKeywordsStmt.run(user.chat_id);
+    
+    for (const k of keywords) {
+      insertKeywordRawStmt.run(k.user_id, k.term, k.term_normalized, k.max_price_cents);
+    }
+    for (const i of interests) {
+      insertInterestRawStmt.run(i.user_id, i.store_name, i.store_normalized);
+    }
+  });
+
+  const repo = {
+    countUsers() { return countUsersStmt.get().count; },
+    getUserRaw(chatId) { return getUserRawStmt.get(chatId) || null; },
+    listKeywordsRaw(chatId) { return listKeywordsRawStmt.all(chatId); },
+    listCouponInterestsRaw(chatId) { return listCouponInterestsRawStmt.all(chatId); },
+    bulkSyncFromCloud(users, keywords, interests) { bulkSyncTx(users, keywords, interests); },
+    syncUserFromCloud(user, keywords, interests) { syncUserTx(user, keywords, interests); },
     upsertUser(chatId, name) {
       const existing = findUserByChatIdStmt.get(chatId);
       upsertUserStmt.run(chatId, name || null);
+      triggerDebouncedSync(chatId, repo);
       return { isNew: !existing };
     },
     getUserAlertMode(chatId) {
@@ -458,6 +524,7 @@ export function createRepo(db) {
     setUserAlertMode(chatId, mode) {
       const normalizedMode = normalizeAlertMode(mode);
       const result = updateUserAlertModeStmt.run(normalizedMode, chatId);
+      if (result.changes > 0) triggerDebouncedSync(chatId, repo);
       return {
         updated: result.changes > 0,
         mode: normalizedMode,
@@ -477,6 +544,7 @@ export function createRepo(db) {
       const existing = findKeywordByUserAndNormalizedStmt.get(chatId, normalized);
       if (!existing) {
         insertKeywordStmt.run(chatId, cleanTerm, normalized, normalizedMaxPrice);
+        triggerDebouncedSync(chatId, repo);
         return { status: "added" };
       }
 
@@ -489,14 +557,17 @@ export function createRepo(db) {
       }
 
       updateKeywordStmt.run(cleanTerm, normalizedMaxPrice, existing.id);
+      triggerDebouncedSync(chatId, repo);
       return { status: "updated" };
     },
     removeKeyword(chatId, term) {
       const result = removeKeywordStmt.run(chatId, normalizeText(term));
+      if (result.changes > 0) triggerDebouncedSync(chatId, repo);
       return result.changes > 0;
     },
     removeAllKeywords(chatId) {
       const result = removeAllKeywordsStmt.run(chatId);
+      if (result.changes > 0) triggerDebouncedSync(chatId, repo);
       return result.changes;
     },
     listKeywords(chatId) {
@@ -592,10 +663,12 @@ export function createRepo(db) {
     addCouponInterest(chatId, storeName) {
       const normalized = normalizeText(storeName);
       const result = addCouponInterestStmt.run(chatId, storeName.trim(), normalized);
+      if (result.changes > 0) triggerDebouncedSync(chatId, repo);
       return result.changes > 0;
     },
     removeCouponInterest(chatId, storeName) {
       const result = removeCouponInterestStmt.run(chatId, normalizeText(storeName));
+      if (result.changes > 0) triggerDebouncedSync(chatId, repo);
       return result.changes > 0;
     },
     listCouponInterests(chatId) {
@@ -611,4 +684,6 @@ export function createRepo(db) {
       return listCouponStoreMetricsStmt.all(limit);
     },
   };
+
+  return repo;
 }

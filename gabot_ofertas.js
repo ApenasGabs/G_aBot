@@ -7,11 +7,13 @@ import { setupDatabase } from "./src/db/schema.js";
 import { getAIConfig, isAIEnabled } from "./src/services/aiCouponParser.js";
 import { startBackupScheduler } from "./src/services/backupService.js";
 import { ensureOllamaOnline, getOllamaInstanceStatus } from "./src/services/ollamaManager.js";
+import { flushAllPending, syncFromSupabaseOnBoot } from "./src/services/supabaseSync.js";
 
 const BAILEYS_JSON_ERROR_PATTERN = "Unexpected non-whitespace character after JSON";
 const ERROR_STACK_MAX_LENGTH = 500;
 
 let wppClient = null;
+let botRepo = null;
 
 /**
  * Envia notificacao de erro critico ao grupo admin via WhatsApp
@@ -95,6 +97,8 @@ async function main() {
   setupDatabase(db);
 
   const repo = createRepo(db);
+  botRepo = repo;
+  await syncFromSupabaseOnBoot(repo);
   const normalizedStats = repo.normalizeStoredKeywords();
   if (normalizedStats.removedDuplicates > 0) {
     console.log(
@@ -143,12 +147,14 @@ async function main() {
 // Handlers para encerramento gracioso
 process.on('SIGINT', async () => {
   console.log('\nSIGINT recebido, encerrando...');
+  if (botRepo) await flushAllPending(botRepo);
   await notifyShutdown();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.log('\nSIGTERM recebido, encerrando...');
+  if (botRepo) await flushAllPending(botRepo);
   await notifyShutdown();
   process.exit(0);
 });
