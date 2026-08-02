@@ -449,6 +449,7 @@ export function createRepo(db) {
   const getUserRawStmt = db.prepare('SELECT * FROM users WHERE chat_id = ? LIMIT 1');
   const listKeywordsRawStmt = db.prepare('SELECT * FROM keywords WHERE user_id = ?');
   const listCouponInterestsRawStmt = db.prepare('SELECT * FROM coupon_interests WHERE user_id = ?');
+  const countUsersStmt = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1');
   
   const clearAllKeywordsStmt = db.prepare('DELETE FROM keywords');
   const clearAllInterestsStmt = db.prepare('DELETE FROM coupon_interests');
@@ -504,6 +505,7 @@ export function createRepo(db) {
   });
 
   const repo = {
+    countUsers() { return countUsersStmt.get().count; },
     getUserRaw(chatId) { return getUserRawStmt.get(chatId) || null; },
     listKeywordsRaw(chatId) { return listKeywordsRawStmt.all(chatId); },
     listCouponInterestsRaw(chatId) { return listCouponInterestsRawStmt.all(chatId); },

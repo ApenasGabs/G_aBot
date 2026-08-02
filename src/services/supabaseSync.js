@@ -46,6 +46,19 @@ export async function syncFromSupabaseOnBoot(repo) {
       `[Supabase Sync] Found ${users?.length || 0} users, ${keywords?.length || 0} keywords, ${interests?.length || 0} interests.`,
     );
 
+    const cloudIsEmpty =
+      (!users || users.length === 0) &&
+      (!keywords || keywords.length === 0) &&
+      (!interests || interests.length === 0);
+    const localUserCount = repo.countUsers();
+
+    if (cloudIsEmpty && localUserCount > 0) {
+      console.warn(
+        `[Supabase Sync] Cloud returned empty data but local has ${localUserCount} user(s). Skipping destructive sync to preserve local data.`,
+      );
+      return;
+    }
+
     repo.bulkSyncFromCloud(users || [], keywords || [], interests || []);
 
     console.log("[Supabase Sync] Boot sync completed successfully.");
@@ -89,7 +102,7 @@ async function pullUserIntegrity(chatId, repo) {
 /**
  * Função responsável por enviar os dados locais de um usuário para a nuvem.
  */
-async function flushUserDataToCloud(chatId, repo) {
+async function flushUserDataToCloud(chatId, repo, retriesLeft = 2) {
   if (!supabase) return;
 
   try {
@@ -152,8 +165,16 @@ async function flushUserDataToCloud(chatId, repo) {
     // Opcional: puxar dados pós escrita para confirmar integridade, como sugerido na issue
     await pullUserIntegrity(chatId, repo);
   } catch (error) {
+    if (retriesLeft > 0) {
+      const delay = (3 - retriesLeft) * 3000;
+      console.warn(
+        `[Supabase Sync] Flush failed for ${chatId}, retrying in ${delay / 1000}s (${retriesLeft} left): ${error.message}`,
+      );
+      await new Promise((r) => setTimeout(r, delay));
+      return flushUserDataToCloud(chatId, repo, retriesLeft - 1);
+    }
     console.error(
-      `[Supabase Sync] Flush failed for user ${chatId}:`,
+      `[Supabase Sync] Flush failed permanently for user ${chatId}:`,
       error.message,
     );
   }
@@ -178,4 +199,37 @@ export function triggerDebouncedSync(chatId, repo) {
   }, SUPABASE_CONFIG.debounceMs);
 
   debounceTimers.set(chatId, timer);
+}
+
+/**
+ * Força o envio de todas as sincronizações pendentes (ex: antes do shutdown).
+ * @param {Object} repo Instância do repositório local
+ */
+export async function flushAllPending(repo) {
+  if (!supabase) return;
+
+  const pendingIds = [...debounceTimers.keys()];
+  for (const chatId of pendingIds) {
+    clearTimeout(debounceTimers.get(chatId));
+    debounceTimers.delete(chatId);
+  }
+
+  if (pendingIds.length === 0) return;
+
+  console.log(
+    `[Supabase Sync] Flushing ${pendingIds.length} pending sync(s) before shutdown...`,
+  );
+
+  const results = await Promise.allSettled(
+    pendingIds.map((chatId) => flushUserDataToCloud(chatId, repo, 1)),
+  );
+
+  const failed = results.filter((r) => r.status === "rejected").length;
+  if (failed > 0) {
+    console.warn(
+      `[Supabase Sync] ${failed}/${pendingIds.length} flush(es) failed during shutdown.`,
+    );
+  } else {
+    console.log("[Supabase Sync] All pending syncs flushed successfully.");
+  }
 }
