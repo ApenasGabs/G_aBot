@@ -14,7 +14,16 @@ if (!url || !key) {
   process.exit(1);
 }
 
-const supabase = createClient(url, key);
+const NoopWebSocket = class {
+  constructor() { this.readyState = 3; }
+  close() {} send() {} addEventListener() {} removeEventListener() {}
+};
+
+const supabase = createClient(url, key, {
+  realtime: {
+    transport: typeof globalThis.WebSocket !== "undefined" ? globalThis.WebSocket : NoopWebSocket
+  }
+});
 const db = new Database("./data/bot.db", { readonly: true });
 
 async function seed() {

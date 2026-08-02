@@ -3,8 +3,27 @@ import { SUPABASE_CONFIG } from "../config.js";
 
 let supabase = null;
 
+// Stub mínimo de WebSocket para Node.js < 22 (sem WebSocket nativo).
+// O bot só usa a REST API do Supabase, não precisa de Realtime/channels.
+const NoopWebSocket = class {
+  constructor() {
+    this.readyState = 3;
+  }
+  close() {}
+  send() {}
+  addEventListener() {}
+  removeEventListener() {}
+};
+
 if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.key) {
-  supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+  supabase = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key, {
+    realtime: {
+      transport:
+        typeof globalThis.WebSocket !== "undefined"
+          ? globalThis.WebSocket
+          : NoopWebSocket,
+    },
+  });
 }
 
 const debounceTimers = new Map();

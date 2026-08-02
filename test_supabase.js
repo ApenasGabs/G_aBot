@@ -31,7 +31,16 @@ if (key.startsWith("sb_secret_")) {
 }
 
 // 3. Testar conexão
-const supabase = createClient(url, key);
+const NoopWebSocket = class {
+  constructor() { this.readyState = 3; }
+  close() {} send() {} addEventListener() {} removeEventListener() {}
+};
+
+const supabase = createClient(url, key, {
+  realtime: {
+    transport: typeof globalThis.WebSocket !== "undefined" ? globalThis.WebSocket : NoopWebSocket
+  }
+});
 
 try {
   // Testar leitura da tabela users
