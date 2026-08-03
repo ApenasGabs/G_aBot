@@ -23,6 +23,8 @@ import { buildCouponAlertMessage } from "./couponAlertMessage.js";
 import { findMatches } from "./matching.js";
 import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
 
+const disconnectTimestamps = [];
+
 const baileysLogger = pino({ level: "silent" });
 
 const formatCurrencyBRL = (cents) => {
@@ -98,8 +100,18 @@ export async function initWhatsappBot({
               const timestamp = new Date().toLocaleString("pt-BR", {
                 timeZone: "America/Sao_Paulo",
               });
+
+              let msg = `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.3.3`;
+              
+              const fs = await import("fs");
+              const flagPath = authDir + "/loop_crash.flag";
+              if (fs.existsSync(flagPath)) {
+                msg = `⚠️ Bot recuperado de um loop de falhas (reinício forçado pelo sistema após 3 quedas)\nHorário: ${timestamp}`;
+                fs.unlinkSync(flagPath);
+              }
+
               await client.sendMessage(BOT_CONFIG.adminGroupId, {
-                text: `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.0.1`,
+                text: msg,
               });
             } catch (error) {
               console.log(
@@ -135,7 +147,23 @@ export async function initWhatsappBot({
         }
 
         if (shouldReconnect) {
-          console.log("Tentando reconectar em 5s...");
+          const now = Date.now();
+          disconnectTimestamps.push(now);
+          // Manter apenas nos ultimos 3 minutos
+          while (disconnectTimestamps.length > 0 && now - disconnectTimestamps[0] > 180000) {
+            disconnectTimestamps.shift();
+          }
+
+          if (disconnectTimestamps.length >= 3) {
+             console.log("Detectado loop de reconexao (3 falhas em 3min). Reiniciando processo.");
+             import("fs").then(fs => {
+               fs.writeFileSync(authDir + "/loop_crash.flag", "1");
+               process.exit(1);
+             });
+             return;
+          }
+
+          console.log(`Tentando reconectar em 5s... (tentativa ${disconnectTimestamps.length}/3)`);
           setTimeout(connect, 5000);
         } else {
           console.log("Sessao deslogada. Escaneie o QR novamente.");
