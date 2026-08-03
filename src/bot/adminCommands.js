@@ -1022,6 +1022,14 @@ const handleSuggestionBatch = async (reply, repo, client, ids, action) => {
     if (success) {
       successIds.push(id);
       if (suggestion) {
+        if (type === "g" && action === "approved" && suggestion.invite_code) {
+          try {
+            await client.groupAcceptInvite(suggestion.invite_code);
+            console.log(`[ADMIN] Bot entrou no grupo via convite ${suggestion.invite_code}`);
+          } catch (err) {
+            console.error(`[ADMIN] Erro ao entrar no grupo via convite ${suggestion.invite_code}:`, err.message);
+          }
+        }
         await notifySuggestionStatusChange(client, type, suggestion, action);
       }
     } else {
@@ -1098,6 +1106,14 @@ const handleWildcardSuggestions = async (
             : repo.updateGeneralSuggestionStatus(currentSuggestion.id, action);
 
         if (success) {
+          if (cleanedPrefix === "g" && action === "approved" && currentSuggestion.invite_code) {
+            try {
+              await client.groupAcceptInvite(currentSuggestion.invite_code);
+              console.log(`[ADMIN] Bot entrou no grupo via convite (wildcard) ${currentSuggestion.invite_code}`);
+            } catch (err) {
+              console.error(`[ADMIN] Erro ao entrar no grupo via convite ${currentSuggestion.invite_code}:`, err.message);
+            }
+          }
           await notifySuggestionStatusChange(
             client,
             cleanedPrefix,
