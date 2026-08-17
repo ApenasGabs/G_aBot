@@ -138,26 +138,37 @@ async function main() {
 
   wppClient = await initWhatsappBot({
     repo,
+    db, // Repassando DB para o useSqliteAuthState
     authDir: PATHS.authDir,
     logsGroupsDir: PATHS.logsGroupsDir,
     logsUsersDir: PATHS.logsUsersDir,
   });
 }
 
-// Handlers para encerramento gracioso
-process.on('SIGINT', async () => {
-  console.log('\nSIGINT recebido, encerrando...');
-  if (botRepo) await flushAllPending(botRepo);
-  await notifyShutdown();
-  process.exit(0);
-});
+// Handlers para encerramento gracioso (com timeout para não travar PM2)
+const gracefulShutdown = async (signal) => {
+  console.log(`\n${signal} recebido, encerrando...`);
+  
+  // Hard timeout de 3s para garantir que o processo morre
+  const forceExit = setTimeout(() => {
+    console.log('Timeout de shutdown atingido, forçando saída.');
+    process.exit(0);
+  }, 3000);
+  forceExit.unref(); // Não impede o event loop de fechar
 
-process.on('SIGTERM', async () => {
-  console.log('\nSIGTERM recebido, encerrando...');
-  if (botRepo) await flushAllPending(botRepo);
-  await notifyShutdown();
+  try {
+    if (botRepo) await flushAllPending(botRepo);
+    await notifyShutdown();
+  } catch (error) {
+    console.log('Erro durante shutdown:', error.message);
+  }
+
+  clearTimeout(forceExit);
   process.exit(0);
-});
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 main().catch((error) => {
   console.error("Erro fatal:", error.message);

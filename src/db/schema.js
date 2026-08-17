@@ -88,6 +88,18 @@ export function setupDatabase(db) {
       false_positive_count INTEGER NOT NULL DEFAULT 0,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS wa_auth_creds (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      data TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS wa_auth_keys (
+      type TEXT NOT NULL,
+      key_id TEXT NOT NULL,
+      data TEXT NOT NULL,
+      PRIMARY KEY (type, key_id)
+    );
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all();

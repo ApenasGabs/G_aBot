@@ -1,9 +1,8 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
-  useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
-import { copyFile, readFile } from "node:fs/promises";
+import { useSqliteAuthState } from "./sqliteAuthState.js";
 import path from "node:path";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
@@ -27,7 +26,7 @@ import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
 
 const disconnectTimestamps = [];
 
-const baileysLogger = pino({ level: "silent" });
+const baileysLogger = pino({ level: "warn" });
 
 const RECONNECT_BASE_DELAY_MS = 5000;
 const RECONNECT_MAX_DELAY_MS = 120000;
@@ -46,57 +45,7 @@ const connLog = (message, ...args) => {
   console.log(`[CONN ${ts}] ${message}`, ...args);
 };
 
-/**
- * Valida se o creds.json existe e contém dados de sessão válidos
- *
- * @param {string} authDir - Diretório de autenticação
- * @returns {Promise<boolean>} true se válido
- */
-const validateAuthState = async (authDir) => {
-  const credsPath = path.join(authDir, "creds.json");
-  try {
-    const content = await readFile(credsPath, "utf8");
-    const parsed = JSON.parse(content);
-    // creds válido tem pelo menos noiseKey ou me.id
-    return !!(parsed.me?.id || parsed.noiseKey);
-  } catch {
-    return false;
-  }
-};
 
-/**
- * Cria backup do creds.json para recuperação em caso de corrupção
- *
- * @param {string} authDir - Diretório de autenticação
- */
-const backupCreds = async (authDir) => {
-  const src = path.join(authDir, "creds.json");
-  const dst = path.join(authDir, "creds.json.bak");
-  try {
-    await copyFile(src, dst);
-    connLog("Backup de creds.json criado");
-  } catch {
-    // Ignora se creds.json ainda não existe
-  }
-};
-
-/**
- * Restaura creds.json a partir do backup
- *
- * @param {string} authDir - Diretório de autenticação
- * @returns {Promise<boolean>} true se restaurou com sucesso
- */
-const restoreCreds = async (authDir) => {
-  const src = path.join(authDir, "creds.json.bak");
-  const dst = path.join(authDir, "creds.json");
-  try {
-    await copyFile(src, dst);
-    connLog("creds.json restaurado a partir do backup");
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 /**
  * Calcula delay de reconexão com backoff exponencial
@@ -130,6 +79,7 @@ const describeStatusCode = (code) => {
 
 export async function initWhatsappBot({
   repo,
+  db,
   authDir,
   logsGroupsDir,
   logsUsersDir,
@@ -140,18 +90,9 @@ export async function initWhatsappBot({
   const groupNameCache = new Map();
   const privateUserNameCache = new Map();
 
-  // Validar auth state inicial
-  const authValid = await validateAuthState(authDir);
-  if (!authValid) {
-    connLog("⚠️ Auth state inválido ou inexistente. Será necessário parear novamente.");
-  } else {
-    connLog("✅ Auth state validado com sucesso");
-    await backupCreds(authDir);
-  }
-
   const connect = async () => {
-    // Recarregar auth state a cada reconexão para evitar creds stale
-    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    // Carregar auth state do SQLite
+    const { state, saveCreds } = await useSqliteAuthState(db);
     const { version } = await fetchLatestBaileysVersion();
 
     connLog(`Iniciando conexão (tentativa ${reconnectAttempt + 1}, versão WA: ${version.join(".")})`);
@@ -172,8 +113,11 @@ export async function initWhatsappBot({
       getMessage: async () => undefined,
     });
 
-    // Pairing code: alternativa ao QR para pareamento remoto
-    if (!state.creds.registered && BOT_CONFIG.phoneNumber) {
+    // Pairing code: somente quando NÃO existe sessão anterior (device novo)
+    // Verifica me.id ao invés de registered — registered fica false após desconexão longa
+    // mas me.id persiste enquanto a sessão existir no arquivo creds.json
+    const isNewDevice = !state.creds.me?.id;
+    if (isNewDevice && BOT_CONFIG.phoneNumber && reconnectAttempt === 0) {
       try {
         // Aguarda socket estar pronto antes de solicitar pairing code
         await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -185,6 +129,10 @@ export async function initWhatsappBot({
       } catch (pairingError) {
         connLog("Falha ao solicitar pairing code, usando QR:", pairingError.message);
       }
+    } else if (isNewDevice && !BOT_CONFIG.phoneNumber) {
+      connLog("Device novo detectado. Configure BOT_PHONE_NUMBER no .env ou escaneie o QR Code.");
+    } else if (!isNewDevice) {
+      connLog(`Sessão existente encontrada (${state.creds.me.id}). Reconectando...`);
     }
 
     const dispatchQueue = createDispatchQueue(async (job) => {
@@ -207,7 +155,7 @@ export async function initWhatsappBot({
     client.ev.on("connection.update", async (update) => {
       const { connection, qr, lastDisconnect } = update;
 
-      if (qr && !BOT_CONFIG.phoneNumber) {
+      if (qr && !BOT_CONFIG.phoneNumber && !state.creds.me?.id) {
         console.log("Escaneie o QR code com seu WhatsApp:");
         qrcode.generate(qr, { small: true });
       }
@@ -216,9 +164,6 @@ export async function initWhatsappBot({
         ready = true;
         reconnectAttempt = 0; // Reset backoff ao conectar com sucesso
         connLog("✅ Conexão estabelecida com sucesso");
-
-        // Backup do creds após conexão bem sucedida
-        await backupCreds(authDir);
 
         // Notifica grupo admin que o bot iniciou
         if (BOT_CONFIG.adminGroupId) {
@@ -307,11 +252,6 @@ export async function initWhatsappBot({
             // Conexão substituída: delay longo para evitar conflito
             delay = getReconnectDelay(3); // ~40s
             connLog("Conexão substituída por outro dispositivo. Aguardando antes de reconectar.");
-          } else if (statusCode === DisconnectReason.badSession) {
-            // Sessão corrompida: tentar restaurar backup
-            connLog("Sessão inválida detectada. Tentando restaurar backup...");
-            const restored = await restoreCreds(authDir);
-            delay = restored ? RECONNECT_BASE_DELAY_MS : getReconnectDelay(reconnectAttempt);
           } else {
             // Default: backoff exponencial
             delay = getReconnectDelay(reconnectAttempt);
