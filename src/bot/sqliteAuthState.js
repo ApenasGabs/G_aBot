@@ -1,4 +1,4 @@
-import { initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
+import { initAuthCreds, BufferJSON, proto } from "@whiskeysockets/baileys";
 
 /**
  * Custom authentication state for Baileys using SQLite (better-sqlite3).
@@ -30,27 +30,51 @@ export const useSqliteAuthState = async (db) => {
 
   const keys = {
     get: async (type, ids) => {
-      const data = {};
-      for (const id of ids) {
-        let value = getKeyStmt.get(type, id);
-        if (value) {
-          data[id] = JSON.parse(value.data, BufferJSON.reviver);
-        }
-      }
-      return data;
-    },
-    set: async (data) => {
-      for (const category in data) {
-        for (const id in data[category]) {
-          const value = data[category][id];
+      try {
+        const data = {};
+        for (const id of ids) {
+          let value = getKeyStmt.get(type, id);
           if (value) {
-            setKeyStmt.run(category, id, JSON.stringify(value, BufferJSON.replacer));
-          } else {
-            deleteKeyStmt.run(category, id);
+            value = JSON.parse(value.data, BufferJSON.reviver);
+            if (type === 'app-state-sync-key' && value) {
+              value = proto.Message.AppStateSyncKeyData.fromObject(value);
+            }
+            data[id] = value;
           }
         }
+        return data;
+      } catch (err) {
+        console.error(`[SQLite Auth] Erro no get(${type}, ${ids}):`, err);
+        throw err;
       }
     },
+    set: async (data) => {
+      try {
+        for (const category in data) {
+          for (const id in data[category]) {
+            const value = data[category][id];
+            if (value) {
+              setKeyStmt.run(category, id, JSON.stringify(value, BufferJSON.replacer));
+            } else {
+              deleteKeyStmt.run(category, id);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[SQLite Auth] Erro no set():`, err);
+        throw err;
+      }
+    },
+  };
+
+  const clearState = () => {
+    try {
+      db.prepare("DELETE FROM wa_auth_creds").run();
+      db.prepare("DELETE FROM wa_auth_keys").run();
+      console.log("[SQLite Auth] Sessão apagada com sucesso do banco de dados.");
+    } catch (err) {
+      console.error("[SQLite Auth] Erro ao limpar sessão:", err);
+    }
   };
 
   return {
@@ -59,5 +83,6 @@ export const useSqliteAuthState = async (db) => {
       keys,
     },
     saveCreds,
+    clearState,
   };
 };

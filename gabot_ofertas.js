@@ -14,6 +14,7 @@ const ERROR_STACK_MAX_LENGTH = 500;
 
 let wppClient = null;
 let botRepo = null;
+let botDb = null;
 
 /**
  * Envia notificacao de erro critico ao grupo admin via WhatsApp
@@ -95,6 +96,7 @@ async function main() {
   const db = new Database(PATHS.dbPath);
   db.pragma("journal_mode = WAL");
   setupDatabase(db);
+  botDb = db;
 
   const repo = createRepo(db);
   botRepo = repo;
@@ -152,6 +154,7 @@ const gracefulShutdown = async (signal) => {
   // Hard timeout de 3s para garantir que o processo morre
   const forceExit = setTimeout(() => {
     console.log('Timeout de shutdown atingido, forçando saída.');
+    if (botDb) botDb.close();
     process.exit(0);
   }, 3000);
   forceExit.unref(); // Não impede o event loop de fechar
@@ -163,6 +166,10 @@ const gracefulShutdown = async (signal) => {
     console.log('Erro durante shutdown:', error.message);
   }
 
+  if (botDb) {
+    console.log('Fechando banco de dados SQLite...');
+    botDb.close();
+  }
   clearTimeout(forceExit);
   process.exit(0);
 };

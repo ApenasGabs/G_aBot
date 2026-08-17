@@ -92,7 +92,7 @@ export async function initWhatsappBot({
 
   const connect = async () => {
     // Carregar auth state do SQLite
-    const { state, saveCreds } = await useSqliteAuthState(db);
+    const { state, saveCreds, clearState } = await useSqliteAuthState(db);
     const { version } = await fetchLatestBaileysVersion();
 
     connLog(`Iniciando conexão (tentativa ${reconnectAttempt + 1}, versão WA: ${version.join(".")})`);
@@ -108,30 +108,15 @@ export async function initWhatsappBot({
       keepAliveIntervalMs: 30000,
       retryRequestDelayMs: 250,
 
-      shouldSyncHistoryMessage: () => false,
       shouldIgnoreJid: (jid) => jid?.endsWith("@broadcast"),
       getMessage: async () => undefined,
     });
 
-    // Pairing code: somente quando NÃO existe sessão anterior (device novo)
     // Verifica me.id ao invés de registered — registered fica false após desconexão longa
-    // mas me.id persiste enquanto a sessão existir no arquivo creds.json
     const isNewDevice = !state.creds.me?.id;
-    if (isNewDevice && BOT_CONFIG.phoneNumber && reconnectAttempt === 0) {
-      try {
-        // Aguarda socket estar pronto antes de solicitar pairing code
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        const code = await client.requestPairingCode(BOT_CONFIG.phoneNumber);
-        console.log("\n" + "=".repeat(50));
-        console.log(`🔑 CÓDIGO DE PAREAMENTO: ${code}`);
-        console.log("Digite no WhatsApp > Aparelhos Conectados > Conectar Dispositivo");
-        console.log("=".repeat(50) + "\n");
-      } catch (pairingError) {
-        connLog("Falha ao solicitar pairing code, usando QR:", pairingError.message);
-      }
-    } else if (isNewDevice && !BOT_CONFIG.phoneNumber) {
-      connLog("Device novo detectado. Configure BOT_PHONE_NUMBER no .env ou escaneie o QR Code.");
-    } else if (!isNewDevice) {
+    if (isNewDevice) {
+      connLog("Device novo detectado. Escaneie o QR Code que aparecerá a seguir.");
+    } else {
       connLog(`Sessão existente encontrada (${state.creds.me.id}). Reconectando...`);
     }
 
@@ -155,7 +140,7 @@ export async function initWhatsappBot({
     client.ev.on("connection.update", async (update) => {
       const { connection, qr, lastDisconnect } = update;
 
-      if (qr && !BOT_CONFIG.phoneNumber && !state.creds.me?.id) {
+      if (qr && !state.creds.me?.id) {
         console.log("Escaneie o QR code com seu WhatsApp:");
         qrcode.generate(qr, { small: true });
       }
@@ -261,14 +246,9 @@ export async function initWhatsappBot({
           reconnectAttempt++;
           setTimeout(connect, delay);
         } else {
-          connLog("❌ Sessão deslogada pelo WhatsApp. É necessário parear novamente.");
-          
-          if (BOT_CONFIG.phoneNumber) {
-            connLog("💡 Configure BOT_PHONE_NUMBER e reinicie o bot para usar pairing code.");
-            connLog("Ou limpe a pasta auth_info e reinicie: rm -rf auth_info/* && pm2 restart gabot");
-          } else {
-            connLog("Limpe a pasta auth_info e reinicie para gerar novo QR: rm -rf auth_info/* && pm2 restart gabot");
-          }
+          connLog("❌ Sessão deslogada pelo WhatsApp. É necessário parear novamente via QR Code.");
+          clearState(); // Limpa as chaves automaticamente do banco de dados
+          connLog("A sessão antiga foi excluída automaticamente do banco de dados. Reinicie o bot para gerar um novo QR Code: pm2 restart gabot");
         }
       }
     });
@@ -640,11 +620,10 @@ export async function initWhatsappBot({
       }
     }, 100);
 
-    // Timeout de 60s (aumentado de 30s para dar tempo ao pairing code)
+    // Timeout de 30s (aumentado de 30s para dar tempo ao pairing code)
     setTimeout(() => {
       clearInterval(checkReady);
       resolve(client);
-    }, 60000);
+    }, 30000);
   });
 }
-
