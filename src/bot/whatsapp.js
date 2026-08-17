@@ -3,6 +3,8 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
+import { copyFile, readFile } from "node:fs/promises";
+import path from "node:path";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
@@ -27,12 +29,103 @@ const disconnectTimestamps = [];
 
 const baileysLogger = pino({ level: "silent" });
 
+const RECONNECT_BASE_DELAY_MS = 5000;
+const RECONNECT_MAX_DELAY_MS = 120000;
+const FAST_RECONNECT_DELAY_MS = 2000;
+
 const formatCurrencyBRL = (cents) => {
   if (!Number.isFinite(cents) || cents <= 0) return "R$ 0,00";
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
   }).format(cents / 100);
+};
+
+const connLog = (message, ...args) => {
+  const ts = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  console.log(`[CONN ${ts}] ${message}`, ...args);
+};
+
+/**
+ * Valida se o creds.json existe e contém dados de sessão válidos
+ *
+ * @param {string} authDir - Diretório de autenticação
+ * @returns {Promise<boolean>} true se válido
+ */
+const validateAuthState = async (authDir) => {
+  const credsPath = path.join(authDir, "creds.json");
+  try {
+    const content = await readFile(credsPath, "utf8");
+    const parsed = JSON.parse(content);
+    // creds válido tem pelo menos noiseKey ou me.id
+    return !!(parsed.me?.id || parsed.noiseKey);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Cria backup do creds.json para recuperação em caso de corrupção
+ *
+ * @param {string} authDir - Diretório de autenticação
+ */
+const backupCreds = async (authDir) => {
+  const src = path.join(authDir, "creds.json");
+  const dst = path.join(authDir, "creds.json.bak");
+  try {
+    await copyFile(src, dst);
+    connLog("Backup de creds.json criado");
+  } catch {
+    // Ignora se creds.json ainda não existe
+  }
+};
+
+/**
+ * Restaura creds.json a partir do backup
+ *
+ * @param {string} authDir - Diretório de autenticação
+ * @returns {Promise<boolean>} true se restaurou com sucesso
+ */
+const restoreCreds = async (authDir) => {
+  const src = path.join(authDir, "creds.json.bak");
+  const dst = path.join(authDir, "creds.json");
+  try {
+    await copyFile(src, dst);
+    connLog("creds.json restaurado a partir do backup");
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Calcula delay de reconexão com backoff exponencial
+ *
+ * @param {number} attempt - Número da tentativa (0-based)
+ * @returns {number} Delay em ms
+ */
+const getReconnectDelay = (attempt) => {
+  return Math.min(RECONNECT_BASE_DELAY_MS * Math.pow(2, attempt), RECONNECT_MAX_DELAY_MS);
+};
+
+/**
+ * Mapeia status code do Baileys para descrição legível
+ *
+ * @param {number} code - Status code
+ * @returns {string} Descrição
+ */
+const describeStatusCode = (code) => {
+  const descriptions = {
+    [DisconnectReason.loggedOut]: "Sessão deslogada pelo WhatsApp (401)",
+    [DisconnectReason.connectionClosed]: "Conexão fechada (428)",
+    [DisconnectReason.connectionLost]: "Conexão perdida (408)",
+    [DisconnectReason.connectionReplaced]: "Conexão substituída por outro dispositivo (440)",
+    [DisconnectReason.timedOut]: "Timeout de conexão (408)",
+    [DisconnectReason.badSession]: "Sessão inválida (500)",
+    [DisconnectReason.restartRequired]: "Restart obrigatório (515)",
+    [DisconnectReason.multideviceMismatch]: "Incompatibilidade de multi-device (411)",
+  };
+  return descriptions[code] || `Código desconhecido (${code})`;
 };
 
 export async function initWhatsappBot({
@@ -43,13 +136,26 @@ export async function initWhatsappBot({
 }) {
   let client = null;
   let ready = false;
+  let reconnectAttempt = 0;
   const groupNameCache = new Map();
   const privateUserNameCache = new Map();
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+  // Validar auth state inicial
+  const authValid = await validateAuthState(authDir);
+  if (!authValid) {
+    connLog("⚠️ Auth state inválido ou inexistente. Será necessário parear novamente.");
+  } else {
+    connLog("✅ Auth state validado com sucesso");
+    await backupCreds(authDir);
+  }
 
-  const connect = () => {
+  const connect = async () => {
+    // Recarregar auth state a cada reconexão para evitar creds stale
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    connLog(`Iniciando conexão (tentativa ${reconnectAttempt + 1}, versão WA: ${version.join(".")})`);
+
     client = makeWASocket({
       auth: state,
       version,
@@ -58,11 +164,28 @@ export async function initWhatsappBot({
       markOnlineOnConnect: false,
       browser: BOT_CONFIG.browserIdentity,
       syncFullHistory: false,
+      keepAliveIntervalMs: 30000,
+      retryRequestDelayMs: 250,
 
       shouldSyncHistoryMessage: () => false,
       shouldIgnoreJid: (jid) => jid?.endsWith("@broadcast"),
       getMessage: async () => undefined,
     });
+
+    // Pairing code: alternativa ao QR para pareamento remoto
+    if (!state.creds.registered && BOT_CONFIG.phoneNumber) {
+      try {
+        // Aguarda socket estar pronto antes de solicitar pairing code
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        const code = await client.requestPairingCode(BOT_CONFIG.phoneNumber);
+        console.log("\n" + "=".repeat(50));
+        console.log(`🔑 CÓDIGO DE PAREAMENTO: ${code}`);
+        console.log("Digite no WhatsApp > Aparelhos Conectados > Conectar Dispositivo");
+        console.log("=".repeat(50) + "\n");
+      } catch (pairingError) {
+        connLog("Falha ao solicitar pairing code, usando QR:", pairingError.message);
+      }
+    }
 
     const dispatchQueue = createDispatchQueue(async (job) => {
       await client.sendMessage(job.chatId, { text: job.text });
@@ -84,14 +207,18 @@ export async function initWhatsappBot({
     client.ev.on("connection.update", async (update) => {
       const { connection, qr, lastDisconnect } = update;
 
-      if (qr) {
+      if (qr && !BOT_CONFIG.phoneNumber) {
         console.log("Escaneie o QR code com seu WhatsApp:");
         qrcode.generate(qr, { small: true });
       }
 
       if (connection === "open") {
         ready = true;
-        console.log("WhatsApp conectado. Bot em execucao.");
+        reconnectAttempt = 0; // Reset backoff ao conectar com sucesso
+        connLog("✅ Conexão estabelecida com sucesso");
+
+        // Backup do creds após conexão bem sucedida
+        await backupCreds(authDir);
 
         // Notifica grupo admin que o bot iniciou
         if (BOT_CONFIG.adminGroupId) {
@@ -103,11 +230,13 @@ export async function initWhatsappBot({
 
               let msg = `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.3.3`;
               
-              const fs = await import("fs");
-              const flagPath = authDir + "/loop_crash.flag";
-              if (fs.existsSync(flagPath)) {
-                msg = `⚠️ Bot recuperado de um loop de falhas (reinício forçado pelo sistema após 3 quedas)\nHorário: ${timestamp}`;
-                fs.unlinkSync(flagPath);
+              if (reconnectAttempt === 0) {
+                const fs = await import("fs");
+                const flagPath = authDir + "/loop_crash.flag";
+                if (fs.existsSync(flagPath)) {
+                  msg = `⚠️ Bot recuperado de um loop de falhas (reinício forçado pelo sistema após 3 quedas)\nHorário: ${timestamp}`;
+                  fs.unlinkSync(flagPath);
+                }
               }
 
               await client.sendMessage(BOT_CONFIG.adminGroupId, {
@@ -126,17 +255,19 @@ export async function initWhatsappBot({
       if (connection === "close") {
         ready = false;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const errorMessage = lastDisconnect?.error?.message || "desconhecido";
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.log("Conexao encerrada.");
 
-        // Notifica grupo admin sobre desconexão
+        connLog(`Desconectado | Status: ${describeStatusCode(statusCode)} | Motivo: ${errorMessage}`);
+
+        // Notifica grupo admin sobre desconexão (só se for logout definitivo)
         if (BOT_CONFIG.adminGroupId && !shouldReconnect) {
           try {
             const timestamp = new Date().toLocaleString("pt-BR", {
               timeZone: "America/Sao_Paulo",
             });
             await client.sendMessage(BOT_CONFIG.adminGroupId, {
-              text: `⚠️ Bot desconectado (logout)\nHorário: ${timestamp}`,
+              text: `⚠️ Bot desconectado (logout)\nHorário: ${timestamp}\nStatus: ${describeStatusCode(statusCode)}`,
             });
           } catch (error) {
             console.log(
@@ -155,7 +286,7 @@ export async function initWhatsappBot({
           }
 
           if (disconnectTimestamps.length >= 3) {
-             console.log("Detectado loop de reconexao (3 falhas em 3min). Reiniciando processo.");
+             connLog("Detectado loop de reconexão (3 falhas em 3min). Reiniciando processo via PM2.");
              import("fs").then(fs => {
                fs.writeFileSync(authDir + "/loop_crash.flag", "1");
                process.exit(1);
@@ -163,10 +294,41 @@ export async function initWhatsappBot({
              return;
           }
 
-          console.log(`Tentando reconectar em 5s... (tentativa ${disconnectTimestamps.length}/3)`);
-          setTimeout(connect, 5000);
+          // Calcular delay baseado no tipo de erro
+          let delay;
+          if (statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.timedOut) {
+            // Timeout/perda de rede: reconectar rápido
+            delay = FAST_RECONNECT_DELAY_MS;
+          } else if (statusCode === DisconnectReason.restartRequired) {
+            // Restart obrigatório: recarregar auth com delay moderado
+            delay = getReconnectDelay(Math.min(reconnectAttempt, 2)); // max ~20s
+            connLog("Restart obrigatório detectado. Auth será recarregado na próxima tentativa.");
+          } else if (statusCode === DisconnectReason.connectionReplaced) {
+            // Conexão substituída: delay longo para evitar conflito
+            delay = getReconnectDelay(3); // ~40s
+            connLog("Conexão substituída por outro dispositivo. Aguardando antes de reconectar.");
+          } else if (statusCode === DisconnectReason.badSession) {
+            // Sessão corrompida: tentar restaurar backup
+            connLog("Sessão inválida detectada. Tentando restaurar backup...");
+            const restored = await restoreCreds(authDir);
+            delay = restored ? RECONNECT_BASE_DELAY_MS : getReconnectDelay(reconnectAttempt);
+          } else {
+            // Default: backoff exponencial
+            delay = getReconnectDelay(reconnectAttempt);
+          }
+
+          connLog(`Reconectando em ${(delay / 1000).toFixed(0)}s... (tentativa ${reconnectAttempt + 1})`);
+          reconnectAttempt++;
+          setTimeout(connect, delay);
         } else {
-          console.log("Sessao deslogada. Escaneie o QR novamente.");
+          connLog("❌ Sessão deslogada pelo WhatsApp. É necessário parear novamente.");
+          
+          if (BOT_CONFIG.phoneNumber) {
+            connLog("💡 Configure BOT_PHONE_NUMBER e reinicie o bot para usar pairing code.");
+            connLog("Ou limpe a pasta auth_info e reinicie: rm -rf auth_info/* && pm2 restart gabot");
+          } else {
+            connLog("Limpe a pasta auth_info e reinicie para gerar novo QR: rm -rf auth_info/* && pm2 restart gabot");
+          }
         }
       }
     });
@@ -527,7 +689,7 @@ export async function initWhatsappBot({
     });
   };
 
-  connect();
+  await connect();
 
   // Retorna o cliente para uso externo (notificações de shutdown, etc)
   return new Promise((resolve) => {
@@ -538,10 +700,11 @@ export async function initWhatsappBot({
       }
     }, 100);
 
-    // Timeout de 30s, retorna mesmo se não estiver pronto
+    // Timeout de 60s (aumentado de 30s para dar tempo ao pairing code)
     setTimeout(() => {
       clearInterval(checkReady);
       resolve(client);
-    }, 30000);
+    }, 60000);
   });
 }
+

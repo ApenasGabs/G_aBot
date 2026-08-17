@@ -20,8 +20,10 @@ module.exports = {
       interpreter: "node",
       watch: false,
       autorestart: true,
-      max_restarts: 10,
-      restart_delay: 2000,
+      max_restarts: 50,
+      restart_delay: 5000,
+      max_memory_restart: "256M",
+      exp_backoff_restart_delay: 1000,
       env_file: ".env",
       env: {
         NODE_ENV: "production",

@@ -62,6 +62,7 @@ export const BOT_CONFIG = {
   dispatchIntervalMs: 1300,
   browserIdentity: ["G_aBot", "Chrome", "1.0.0"],
   adminGroupId: process.env.BOT_ADMIN_GROUP_ID || "",
+  phoneNumber: process.env.BOT_PHONE_NUMBER || "",
   allowSystemReboot: process.env.BOT_ALLOW_SYSTEM_REBOOT === "true",
   allowSudoCommands: process.env.BOT_ALLOW_SUDO_COMMANDS === "true",
   sudoPassword: process.env.BOT_SUDO_PASSWORD || "",

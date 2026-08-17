@@ -10,6 +10,7 @@ scrap*
 # Baileys auth directories
 .baileys_auth*
 auth_info/
+auth_info_bk/
 # Bot internal state
 data/restart-pending.json
 data/*.db
