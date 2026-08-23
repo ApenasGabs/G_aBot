@@ -1,5 +1,5 @@
 # Estágio de build para compilar dependências nativas (better-sqlite3)
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 
 # Instala ferramentas necessárias para compilar C++ no node-gyp
@@ -13,7 +13,7 @@ COPY package.json yarn.lock* ./
 RUN yarn install --production --frozen-lockfile
 
 # Estágio final (produção)
-FROM node:20-slim
+FROM node:22-slim
 WORKDIR /app
 
 # Copia as dependências construídas

@@ -2,20 +2,42 @@ version: '3.8'
 
 services:
   gabot:
-    build: .
+    image: node:22
     container_name: gabot
     restart: always
-    environment:
-      - NODE_ENV=production
-    env_file:
-      - .env
     volumes:
-      - ./data:/app/data
+      - /DATA/AppData/gabot:/app
+    working_dir: /app
+    entrypoint: >
+      bash -c "
+      if [ ! -d '/app/.git' ]; then
+        echo 'Diretório .git não encontrado. Clonando repositório...' &&
+        git clone https://github.com/Apenasgabs/G_aBot.git /tmp/gabot &&
+        cp -a /tmp/gabot/. /app/ &&
+        rm -rf /tmp/gabot;
+      fi &&
+      git pull &&
+      yarn install --production --frozen-lockfile &&
+      node gabot_ofertas.js
+      "
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+x-casaos:
+  author: Apenasgabs
+  category: Utilities
+  icon: https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/WhatsApp.svg/512px-WhatsApp.svg.png
+  title:
+    en_us: G_aBot
+  description:
+    en_us: WhatsApp Offer Bot with SQLite Auth and Supabase Sync
+  architectures:
+    - amd64
+    - arm64
+  main: gabot
 
   # Opcional: Descomente para rodar o Ollama local no próprio Docker do ZimaOS
   # ollama:
