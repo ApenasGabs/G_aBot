@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  gabot:
+    build: .
+    container_name: gabot
+    restart: always
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Opcional: Descomente para rodar o Ollama local no próprio Docker do ZimaOS
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: always
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ./ollama:/root/.ollama
