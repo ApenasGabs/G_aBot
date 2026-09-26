@@ -328,15 +328,13 @@ export function createRepo(db) {
   const listRecentCouponsStmt = db.prepare(`
     SELECT
       code,
-      group_name,
-      message_text,
-      is_exhausted,
       store_name,
-      mention_count,
-      strftime('%s', last_seen_at) * 1000 as last_seen_timestamp
+      SUM(mention_count) as mention_count,
+      MAX(strftime('%s', last_seen_at)) * 1000 as last_seen_timestamp
     FROM coupons
     WHERE is_exhausted = 0
-    ORDER BY last_seen_at DESC
+    GROUP BY code_normalized
+    ORDER BY MAX(last_seen_at) DESC
     LIMIT ?
   `);
 
