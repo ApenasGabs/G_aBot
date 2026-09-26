@@ -11,7 +11,7 @@ import {
   detectStoreFromText,
   extractCoupons,
 } from "../services/couponExtractor.js";
-import { logGroupMessage, logUserMessage } from "../services/messageLogger.js";
+import { logGroupMessage, logUserMessage, logExtractionTelemetry } from "../services/messageLogger.js";
 import { createDispatchQueue } from "../utils/queue.js";
 import {
   createOfferHash,
@@ -462,9 +462,6 @@ export async function initWhatsappBot({
               console.log(`[ADMIN DEBUG] Mensagem não é comando admin`);
             }
           } else if (BOT_CONFIG.adminGroupId) {
-            console.log(
-              `[ADMIN DEBUG] Mensagem em grupo diferente do admin (${chatId} !== ${BOT_CONFIG.adminGroupId})`,
-            );
           } else {
             console.log(`[ADMIN DEBUG] BOT_ADMIN_GROUP_ID não configurado`);
           }
@@ -484,15 +481,18 @@ export async function initWhatsappBot({
           const detectedStore = detectStoreFromText(text, groupName, aiStore);
 
           if (coupons.length > 0) {
-            console.log(
-              `[Cupom] Método de extração: ${source}${aiStore ? ` | Loja (IA): ${aiStore}` : ""}`,
-            );
-            if (summaryWithAI) {
-              console.log(`[Cupom] ${summaryWithAI}`);
-            }
-            if (summaryWithoutAI) {
-              console.log(`[Cupom] ${summaryWithoutAI}`);
-            }
+
+            
+          // Salvar log estruturado
+          await logExtractionTelemetry(logsGroupsDir, {
+            groupId: chatId,
+            groupName,
+            text,
+            source,
+            detectedStore,
+            coupons,
+            telemetry
+          });
 
             const allCouponInterests = repo.listAllCouponInterests();
             const contextNormalized = normalizeText(`${groupName} ${text}`);

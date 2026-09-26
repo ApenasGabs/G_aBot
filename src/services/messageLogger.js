@@ -68,3 +68,24 @@ export const logUserMessage = async (usersLogsDir, msgData) => {
     console.error("Erro ao salvar log de usuario:", error.message);
   }
 };
+
+/**
+ * Salva log estruturado (JSONL) das extrações de cupons para análise da IA.
+ * 
+ * @param {string} logsDir - Diretório onde o arquivo de log será salvo
+ * @param {object} telemetryData - Dados da extração do cupom
+ * @returns {Promise<void>}
+ */
+export const logExtractionTelemetry = async (logsDir, telemetryData) => {
+  try {
+    const logFilePath = path.join(logsDir, `extractions.jsonl`);
+    const logEntry = JSON.stringify({
+      timestamp: new Date().toISOString(),
+      ...telemetryData
+    }) + "\n";
+    
+    await appendFile(logFilePath, logEntry, "utf8");
+  } catch (error) {
+    console.error("Erro ao salvar log de telemetria:", error.message);
+  }
+};

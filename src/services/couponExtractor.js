@@ -3,7 +3,7 @@ import { isAIEnabled, parseWithAI } from "./aiCouponParser.js";
 
 const STORE_PATTERNS = [
   { name: "Amazon", regex: /(amazon\.com|amzn\.to|amazon)/i },
-  { name: "Mercado Livre", regex: /(mercadolivre|meli\.uz|ml\.com)/i },
+  { name: "Mercado Livre", regex: /(mercadolivre|meli\.la|meli\.uz|ml\.com)/i },
   { name: "Shopee", regex: /(shopee\.com|s\.shopee)/i },
   { name: "Magazine Luiza", regex: /(magalu|magazineluiza|magalu\.com)/i },
   { name: "Casas Bahia", regex: /(casasbahia|casas bahia)/i },
@@ -211,7 +211,7 @@ export async function extractCoupons(text, groupName = '') {
   }
 
   // Fallback para regex tradicional
-  console.log('[Coupon Extractor] Usando extração regex');
+  
   return extractCouponsRegex(text);
 }
 

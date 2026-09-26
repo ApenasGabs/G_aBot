@@ -328,7 +328,10 @@ export function createRepo(db) {
   const listRecentCouponsStmt = db.prepare(`
     SELECT
       code,
-      store_name,
+      COALESCE(
+        MAX(CASE WHEN store_name != 'Loja nao identificada' AND store_name != 'Desconhecido' THEN store_name END),
+        'Loja nao identificada'
+      ) as store_name,
       SUM(mention_count) as mention_count,
       MAX(strftime('%s', last_seen_at)) * 1000 as last_seen_timestamp
     FROM coupons
