@@ -3,8 +3,8 @@ import { isAIEnabled, parseWithAI } from "./aiCouponParser.js";
 
 const STORE_PATTERNS = [
   { name: "Amazon", regex: /(amazon\.com|amzn\.to|amazon)/i },
-  { name: "Mercado Livre", regex: /(mercadolivre|meli\.la|meli\.uz|ml\.com)/i },
-  { name: "Shopee", regex: /(shopee\.com|s\.shopee)/i },
+  { name: "Mercado Livre", regex: /(mercadolivre|meli\.la|meli\.uz|ml\.com|meli\.promo)/i },
+  { name: "Shopee", regex: /(shopee\.com|s\.shopee|shope\.ee)/i },
   { name: "Magazine Luiza", regex: /(magalu|magazineluiza|magalu\.com)/i },
   { name: "Casas Bahia", regex: /(casasbahia|casas bahia)/i },
   { name: "Kabum", regex: /(kabum|kabum\.com)/i },
