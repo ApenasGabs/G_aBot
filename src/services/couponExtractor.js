@@ -25,6 +25,9 @@ const COUPON_PATTERNS = [
 ];
 
 const COMMON_WORD_BLOCKLIST = new Set([
+  "HTTPS",
+  "HTTP",
+  "WWW",
   "AGORA",
   "HOJE",
   "AMANHA",
