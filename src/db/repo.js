@@ -333,7 +333,8 @@ export function createRepo(db) {
         'Loja nao identificada'
       ) as store_name,
       SUM(mention_count) as mention_count,
-      MAX(strftime('%s', last_seen_at)) * 1000 as last_seen_timestamp
+      MAX(strftime('%s', last_seen_at)) * 1000 as last_seen_timestamp,
+      MIN(strftime('%s', first_seen_at)) * 1000 as first_seen_timestamp
     FROM coupons
     WHERE is_exhausted = 0
     GROUP BY code_normalized

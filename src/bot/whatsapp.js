@@ -550,7 +550,8 @@ export async function initWhatsappBot({
               "🏷️ Cupom": c.code,
               "🏪 Loja": c.store_name && c.store_name.length > 20 ? c.store_name.substring(0, 20) + "..." : (c.store_name || "Desconhecido"),
               "🔥 Menções": c.mention_count,
-              "🕒 Detectado": new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo" })
+              "🆕 Visto 1º": new Date(c.first_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' }),
+              "🕒 Detectado": new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' })
             }));
             console.log("\n================ [ 🛒 DASHBOARD DE CUPONS ] ================");
             console.table(recentCoupons);
