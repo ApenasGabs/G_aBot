@@ -546,16 +546,26 @@ export async function initWhatsappBot({
               }
             }
 
-            const recentCoupons = repo.listRecentCoupons(5).map(c => ({
-              "🏷️ Cupom": c.code,
-              "🏪 Loja": c.store_name && c.store_name.length > 20 ? c.store_name.substring(0, 20) + "..." : (c.store_name || "Desconhecido"),
-              "🔥 Menções": c.mention_count,
-              "🆕 Visto 1º": new Date(c.first_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' }),
-              "🕒 Detectado": new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' })
-            }));
-            console.log("\n================ [ 🛒 DASHBOARD DE CUPONS ] ================");
-            console.table(recentCoupons);
-            console.log("============================================================\n");
+            const storeAbbreviations = {
+              "Mercado Livre": "ML",
+              "Amazon": "AMZN",
+              "Shopee": "SHP",
+              "AliExpress": "ALI",
+              "Magazine Luiza": "MGLU",
+              "Casas Bahia": "CB",
+              "Kabum": "KBM",
+              "Loja nao identificada": "?",
+              "Desconhecido": "?"
+            };
+
+            console.log("\n🛒 --- ÚLTIMOS CUPONS ---");
+            repo.listRecentCoupons(5).forEach((c, i) => {
+              const storeStr = storeAbbreviations[c.store_name] || c.store_name.substring(0, 4).toUpperCase();
+              const firstSeen = new Date(c.first_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' });
+              const lastSeen = new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' });
+              console.log(`${i + 1}. [${storeStr}] ${c.code} (🔥${c.mention_count}) 🕒 ${firstSeen} ~ ${lastSeen}`);
+            });
+            console.log("-------------------------\n");
           } else if (telemetry?.isFalsePositive) {
             repo.incrementCouponStoreMetric(detectedStore, "false_positive", 1);
           }
