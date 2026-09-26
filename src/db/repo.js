@@ -644,7 +644,7 @@ export function createRepo(db) {
     normalizeStoredKeywords() {
       return normalizeStoredKeywordsTx();
     },
-    upsertCoupon({ code, groupId, groupName, messageText, isExhausted }) {
+    upsertCoupon({ code, groupId, groupName, messageText, isExhausted, storeName }) {
       const normalized = normalizeText(code);
       const existing = findCouponByKeyStmt.get(normalized, groupId);
       const existingGlobal = findCouponByCodeStmt.get(normalized);
@@ -654,7 +654,8 @@ export function createRepo(db) {
         groupId,
         groupName || null,
         messageText || null,
-        isExhausted ? 1 : 0
+        isExhausted ? 1 : 0,
+        storeName || "Desconhecido"
       );
       return {
         isNewGroup: !existing,
