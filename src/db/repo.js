@@ -297,14 +297,18 @@ export function createRepo(db) {
       group_name,
       message_text,
       is_exhausted,
+      store_name,
+      mention_count,
       first_seen_at,
       last_seen_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT(code_normalized, group_id) DO UPDATE SET
       last_seen_at = CURRENT_TIMESTAMP,
       is_exhausted = excluded.is_exhausted,
-      message_text = excluded.message_text
+      message_text = excluded.message_text,
+      store_name = excluded.store_name,
+      mention_count = coupons.mention_count + 1
   `);
 
   const findCouponByKeyStmt = db.prepare(`
@@ -327,6 +331,8 @@ export function createRepo(db) {
       group_name,
       message_text,
       is_exhausted,
+      store_name,
+      mention_count,
       strftime('%s', last_seen_at) * 1000 as last_seen_timestamp
     FROM coupons
     WHERE is_exhausted = 0
@@ -340,6 +346,8 @@ export function createRepo(db) {
       group_name,
       message_text,
       is_exhausted,
+      store_name,
+      mention_count,
       strftime('%s', last_seen_at) * 1000 as last_seen_timestamp
     FROM coupons
     WHERE is_exhausted = 0

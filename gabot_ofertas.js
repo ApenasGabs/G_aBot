@@ -92,6 +92,7 @@ async function main() {
   await mkdir(PATHS.logsGroupsDir, { recursive: true });
   await mkdir(PATHS.logsUsersDir, { recursive: true });
   await mkdir(PATHS.backupsDir, { recursive: true });
+  await mkdir(PATHS.authDir, { recursive: true });
 
   const db = new Database(PATHS.dbPath);
   db.pragma("journal_mode = WAL");

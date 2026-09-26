@@ -113,4 +113,14 @@ export function setupDatabase(db) {
   if (!hasMaxPriceCents) {
     db.exec("ALTER TABLE keywords ADD COLUMN max_price_cents INTEGER;");
   }
+
+  const couponCols = db.prepare("PRAGMA table_info(coupons)").all();
+  const hasMentionCount = couponCols.some((column) => column.name === "mention_count");
+  if (!hasMentionCount) {
+    db.exec("ALTER TABLE coupons ADD COLUMN mention_count INTEGER DEFAULT 1;");
+  }
+  const hasStoreName = couponCols.some((column) => column.name === "store_name");
+  if (!hasStoreName) {
+    db.exec("ALTER TABLE coupons ADD COLUMN store_name TEXT DEFAULT 'Desconhecido';");
+  }
 }

@@ -218,6 +218,7 @@ export async function initWhatsappBot({
           if (disconnectTimestamps.length >= 3) {
              connLog("Detectado loop de reconexão (3 falhas em 3min). Reiniciando processo via PM2.");
              import("fs").then(fs => {
+               if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
                fs.writeFileSync(authDir + "/loop_crash.flag", "1");
                process.exit(1);
              });
@@ -504,6 +505,7 @@ export async function initWhatsappBot({
                 groupName,
                 messageText: text.substring(0, 500),
                 isExhausted,
+                storeName: detectedStore,
               });
 
               // Dispara somente quando o cupom eh novo globalmente e ainda ativo
@@ -544,11 +546,15 @@ export async function initWhatsappBot({
               }
             }
 
-            console.log(
-              `Cupons detectados em ${groupName}: ${coupons
-                .map((c) => `${c.code}(${c.confidence}%)`)
-                .join(", ")} ${isExhausted ? "(esgotado)" : ""}`,
-            );
+            const recentCoupons = repo.listRecentCoupons(5).map(c => ({
+              "🏷️ Cupom": c.code,
+              "🏪 Loja": c.store_name && c.store_name.length > 20 ? c.store_name.substring(0, 20) + "..." : (c.store_name || "Desconhecido"),
+              "🔥 Menções": c.mention_count,
+              "🕒 Detectado": new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo" })
+            }));
+            console.log("\n================ [ 🛒 DASHBOARD DE CUPONS ] ================");
+            console.table(recentCoupons);
+            console.log("============================================================\n");
           } else if (telemetry?.isFalsePositive) {
             repo.incrementCouponStoreMetric(detectedStore, "false_positive", 1);
           }
