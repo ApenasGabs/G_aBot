@@ -563,7 +563,7 @@ export async function initWhatsappBot({
               const storeStr = storeAbbreviations[c.store_name] || c.store_name.substring(0, 4).toUpperCase();
               const firstSeen = new Date(c.first_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' });
               const lastSeen = new Date(c.last_seen_timestamp).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: '2-digit', minute:'2-digit' });
-              console.log(`${i + 1}. [${storeStr}] ${c.code} (🔥${c.mention_count}) 🕒 ${firstSeen} ~ ${lastSeen}`);
+              console.log(`${firstSeen}~${lastSeen} 🔥${c.mention_count}-${storeStr} ${c.code}`);
             });
             console.log("-------------------------\n");
           } else if (telemetry?.isFalsePositive) {
