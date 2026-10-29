@@ -1,11 +1,12 @@
 import Database from "better-sqlite3";
 import { mkdir } from "node:fs/promises";
 import { initWhatsappBot } from "./src/bot/whatsapp.js";
-import { BACKUP_CONFIG, BOT_CONFIG, PATHS } from "./src/config.js";
+import { BACKUP_CONFIG, BOT_CONFIG, PATHS, SUPABASE_CONFIG } from "./src/config.js";
 import { createRepo } from "./src/db/repo.js";
 import { setupDatabase } from "./src/db/schema.js";
 import { getAIConfig, isAIEnabled } from "./src/services/aiCouponParser.js";
 import { startBackupScheduler } from "./src/services/backupService.js";
+import { startHealthAndAdminServer } from "./src/services/healthServer.js";
 import { ensureOllamaOnline, getOllamaInstanceStatus } from "./src/services/ollamaManager.js";
 import { flushAllPending, syncFromSupabaseOnBoot } from "./src/services/supabaseSync.js";
 
@@ -15,6 +16,7 @@ const ERROR_STACK_MAX_LENGTH = 500;
 let wppClient = null;
 let botRepo = null;
 let botDb = null;
+let healthHttpServer = null;
 
 /**
  * Envia notificacao de erro critico ao grupo admin via WhatsApp
@@ -69,6 +71,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 async function notifyShutdown() {
+  if (!BOT_CONFIG.notifyRoutineLifecycle) return;
   if (wppClient && BOT_CONFIG.adminGroupId) {
     try {
       const timestamp = new Date().toLocaleString('pt-BR', { 
@@ -98,6 +101,29 @@ async function main() {
   db.pragma("journal_mode = WAL");
   setupDatabase(db);
   botDb = db;
+
+  if (BOT_CONFIG.healthPort > 0) {
+    healthHttpServer = await startHealthAndAdminServer({
+      port: BOT_CONFIG.healthPort,
+      host: BOT_CONFIG.healthHost,
+      webhookSecret: BOT_CONFIG.webhookSecret,
+      checkDatabase: () => {
+        const row = db.prepare("SELECT 1 AS ok").get();
+        return { ok: row?.ok === 1 };
+      },
+      getWhatsappState: () =>
+        wppClient?.getHealthState
+          ? wppClient.getHealthState()
+          : { connected: false, loggedOut: false, reconnectAttempt: 0, recentDisconnects3m: 0 },
+      sendAdminMessage: async (text) => {
+        if (!wppClient?.sendAdminMessage) {
+          return { ok: false, error: "Bot WhatsApp ainda inicializando." };
+        }
+        return wppClient.sendAdminMessage(text);
+      },
+      supabaseConfigured: Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.key),
+    });
+  }
 
   const repo = createRepo(db);
   botRepo = repo;
@@ -161,6 +187,7 @@ const gracefulShutdown = async (signal) => {
   forceExit.unref(); // Não impede o event loop de fechar
 
   try {
+    if (healthHttpServer) await healthHttpServer.close();
     if (botRepo) await flushAllPending(botRepo);
     await notifyShutdown();
   } catch (error) {

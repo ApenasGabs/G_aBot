@@ -86,7 +86,11 @@ export async function initWhatsappBot({
 }) {
   let client = null;
   let ready = false;
+  let loggedOut = false;
   let reconnectAttempt = 0;
+  let lastConnectedAt = null;
+  let lastDisconnectedAt = null;
+  let lastDisconnectReason = null;
   const groupNameCache = new Map();
   const privateUserNameCache = new Map();
 
@@ -147,10 +151,12 @@ export async function initWhatsappBot({
 
       if (connection === "open") {
         ready = true;
+        loggedOut = false;
+        lastConnectedAt = new Date().toISOString();
         reconnectAttempt = 0; // Reset backoff ao conectar com sucesso
         connLog("✅ Conexão estabelecida com sucesso");
 
-        // Notifica grupo admin que o bot iniciou
+        // Notifica grupo admin apenas em recuperacao de crash-loop (ou se ciclo rotineiro estiver explicitamente habilitado)
         if (BOT_CONFIG.adminGroupId) {
           setTimeout(async () => {
             try {
@@ -158,20 +164,20 @@ export async function initWhatsappBot({
                 timeZone: "America/Sao_Paulo",
               });
 
-              let msg = `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.3.3`;
-              
-              if (reconnectAttempt === 0) {
-                const fs = await import("fs");
-                const flagPath = authDir + "/loop_crash.flag";
-                if (fs.existsSync(flagPath)) {
-                  msg = `⚠️ Bot recuperado de um loop de falhas (reinício forçado pelo sistema após 3 quedas)\nHorário: ${timestamp}`;
-                  fs.unlinkSync(flagPath);
-                }
-              }
+              const fs = await import("fs");
+              const flagPath = authDir + "/loop_crash.flag";
+              const recoveredFromCrashLoop = fs.existsSync(flagPath);
 
-              await client.sendMessage(BOT_CONFIG.adminGroupId, {
-                text: msg,
-              });
+              if (recoveredFromCrashLoop) {
+                fs.unlinkSync(flagPath);
+                await client.sendMessage(BOT_CONFIG.adminGroupId, {
+                  text: `⚠️ Bot recuperado de um loop de falhas (reinício forçado pelo sistema após 3 quedas)\nHorário: ${timestamp}`,
+                });
+              } else if (BOT_CONFIG.notifyRoutineLifecycle) {
+                await client.sendMessage(BOT_CONFIG.adminGroupId, {
+                  text: `✅ Bot online\nHorário: ${timestamp}\nVersão: gabot-ofertas v0.3.3`,
+                });
+              }
             } catch (error) {
               console.log(
                 "Erro ao enviar notificação de inicialização:",
@@ -187,8 +193,11 @@ export async function initWhatsappBot({
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const errorMessage = lastDisconnect?.error?.message || "desconhecido";
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        loggedOut = !shouldReconnect;
+        lastDisconnectedAt = new Date().toISOString();
+        lastDisconnectReason = describeStatusCode(statusCode);
 
-        connLog(`Desconectado | Status: ${describeStatusCode(statusCode)} | Motivo: ${errorMessage}`);
+        connLog(`Desconectado | Status: ${lastDisconnectReason} | Motivo: ${errorMessage}`);
 
         // Notifica grupo admin sobre desconexão (só se for logout definitivo)
         if (BOT_CONFIG.adminGroupId && !shouldReconnect) {
@@ -628,19 +637,53 @@ export async function initWhatsappBot({
 
   await connect();
 
-  // Retorna o cliente para uso externo (notificações de shutdown, etc)
+  const botController = {
+    sendMessage: async (jid, content) => {
+      if (!client || !ready) {
+        throw new Error("Sessao WhatsApp nao esta conectada no momento.");
+      }
+      return client.sendMessage(jid, content);
+    },
+    sendAdminMessage: async (text) => {
+      if (!BOT_CONFIG.adminGroupId) {
+        return { ok: false, error: "BOT_ADMIN_GROUP_ID nao configurado." };
+      }
+      if (!client || !ready) {
+        return { ok: false, error: "Sessao WhatsApp reconectando ou offline." };
+      }
+      await client.sendMessage(BOT_CONFIG.adminGroupId, { text });
+      return { ok: true };
+    },
+    getHealthState: () => {
+      const now = Date.now();
+      const recentDisconnects3m = disconnectTimestamps.filter(
+        (ts) => now - ts <= 180000,
+      ).length;
+      return {
+        connected: ready,
+        loggedOut,
+        reconnectAttempt,
+        recentDisconnects3m,
+        lastConnectedAt,
+        lastDisconnectedAt,
+        lastDisconnectReason,
+      };
+    },
+  };
+
+  // Retorna o controlador resiliente (mantem compatibilidade com .sendMessage)
   return new Promise((resolve) => {
     const checkReady = setInterval(() => {
       if (ready && client) {
         clearInterval(checkReady);
-        resolve(client);
+        resolve(botController);
       }
     }, 100);
 
-    // Timeout de 30s (aumentado de 30s para dar tempo ao pairing code)
+    // Timeout de 30s para dar tempo ao pairing code sem travar o startup
     setTimeout(() => {
       clearInterval(checkReady);
-      resolve(client);
+      resolve(botController);
     }, 30000);
   });
 }

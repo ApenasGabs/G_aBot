@@ -5,6 +5,14 @@ services:
     image: node:22
     container_name: gabot
     restart: always
+    ports:
+      - "3091:3091"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3091/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     volumes:
       - /DATA/AppData/gabot:/app
     working_dir: /app
