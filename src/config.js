@@ -75,6 +75,10 @@ export const BOT_CONFIG = {
     .filter(Boolean),
   ollamaDefaultInstance: process.env.OLLAMA_DEFAULT_INSTANCE || "local",
   ollamaInstances: buildOllamaInstances(),
+  notifyRoutineLifecycle: process.env.BOT_NOTIFY_ROUTINE_LIFECYCLE === "true",
+  healthPort: parseInt(process.env.BOT_HEALTH_PORT || "3091", 10),
+  healthHost: process.env.BOT_HEALTH_HOST || "0.0.0.0",
+  webhookSecret: (process.env.GABOT_WEBHOOK_SECRET || "").trim(),
 };
 
 export const BACKUP_CONFIG = {
