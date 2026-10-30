@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import assert from "node:assert/strict";
 import test from "node:test";
+import pino from "pino";
 import { createRepo } from "../src/db/repo.js";
 import { setupDatabase } from "../src/db/schema.js";
 
@@ -121,4 +122,131 @@ test("repo remove todos os filtros de um usuario", () => {
   assert.deepEqual(repo.listKeywords("u1"), []);
 
   db.close();
+});
+
+test("repo.upsertCoupon trata mensagens sem chave esperada ou com codigo vazio/nulo sem lancar excecao", () => {
+  const { db, repo } = createInMemoryRepo();
+
+  // Payload nulo ou nao-objeto
+  const nullResult = repo.upsertCoupon(null);
+  assert.equal(nullResult.skipped, true);
+  assert.equal(nullResult.reason, "invalid_payload");
+
+  // Sem codigo
+  const noCodeResult = repo.upsertCoupon({ groupId: "g1", groupName: "Grupo 1" });
+  assert.equal(noCodeResult.skipped, true);
+  assert.equal(noCodeResult.reason, "empty_code");
+
+  // Codigo nulo ou vazio
+  const emptyCodeResult = repo.upsertCoupon({ code: null, groupId: "g1" });
+  assert.equal(emptyCodeResult.skipped, true);
+  assert.equal(emptyCodeResult.reason, "empty_code");
+
+  // Codigo apenas espacos
+  const whitespaceCodeResult = repo.upsertCoupon({ code: "   ", groupId: "g1" });
+  assert.equal(whitespaceCodeResult.skipped, true);
+  assert.equal(whitespaceCodeResult.reason, "empty_code");
+
+  // Sem groupId
+  const noGroupResult = repo.upsertCoupon({ code: "CUPOM10" });
+  assert.equal(noGroupResult.skipped, true);
+  assert.equal(noGroupResult.reason, "empty_group_id");
+
+  // Nenhum cupom deve ter sido inserido
+  const recent = repo.listRecentCoupons(10);
+  assert.equal(recent.length, 0);
+
+  db.close();
+});
+
+test("repo.upsertCoupon e repo.markOfferAsProcessed tratam caracteres nulos sem quebrar o SQLite", () => {
+  const { db, repo } = createInMemoryRepo();
+
+  // Cupom com bytes nulos \0 no codigo, grupo e texto
+  const couponWithNullBytes = repo.upsertCoupon({
+    code: "CUPOM\0SAFE10",
+    groupId: "group\0_123",
+    groupName: "Grupo\0 VIP",
+    messageText: "Use o cupom CUPOM\0SAFE10 com desconto\0!",
+    isExhausted: false,
+    storeName: "Amazon\0 Brasil",
+  });
+
+  assert.equal(couponWithNullBytes.isNewGroup, true);
+  assert.equal(couponWithNullBytes.isNewGlobal, true);
+
+  // Consulta do cupom persistido
+  const recent = repo.listRecentCoupons(1);
+  assert.equal(recent.length, 1);
+  assert.equal(recent[0].code, "CUPOMSAFE10");
+  assert.equal(recent[0].store_name, "Amazon Brasil");
+
+  // Marcar oferta processada com byte nulo
+  const marked = repo.markOfferAsProcessed("hash\0_teste_123");
+  assert.equal(marked, true);
+
+  // Segunda inserção deve ignorar (deduplicação) sem lançar erro
+  const markedAgain = repo.markOfferAsProcessed("hash\0_teste_123");
+  assert.equal(markedAgain, false);
+
+  db.close();
+});
+
+test("repo.incrementCouponStoreMetric trata caracteres nulos sem falhar a transacao", () => {
+  const { db, repo } = createInMemoryRepo();
+
+  // Metrica com caractere nulo no nome da loja
+  repo.incrementCouponStoreMetric("Shopee\0 Oficial", "detected", 1);
+  repo.incrementCouponStoreMetric("Shopee\0 Oficial", "matched", 1);
+
+  const metrics = repo.listCouponStoreMetrics(5);
+  assert.equal(metrics.length, 1);
+  assert.equal(metrics[0].store_name, "Shopee Oficial");
+  assert.equal(metrics[0].detected_count, 1);
+  assert.equal(metrics[0].matched_count, 1);
+
+  db.close();
+});
+
+test("logger com serializer de error serializa message e stack em vez de objeto vazio", () => {
+  let loggedOutput = "";
+  const customStream = {
+    write: (chunk) => {
+      loggedOutput += chunk;
+    },
+  };
+
+  const testLogger = pino(
+    {
+      level: "warn",
+      serializers: {
+        err: pino.stdSerializers.err,
+        error: (err) => {
+          if (!err) return err;
+          if (err instanceof Error) {
+            return pino.stdSerializers.err(err);
+          }
+          if (typeof err === "object") {
+            return {
+              message: err.message || String(err),
+              stack: err.stack,
+              code: err.code,
+              ...err,
+            };
+          }
+          return { message: String(err) };
+        },
+      },
+    },
+    customStream
+  );
+
+  const testErr = new Error("transaction failed, rolling back");
+  testLogger.error({ error: testErr }, "transaction failed, rolling back");
+
+  const parsed = JSON.parse(loggedOutput.trim());
+  assert.equal(parsed.msg, "transaction failed, rolling back");
+  assert.ok(parsed.error);
+  assert.equal(parsed.error.message, "transaction failed, rolling back");
+  assert.ok(parsed.error.stack.includes("Error: transaction failed, rolling back"));
 });

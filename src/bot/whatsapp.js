@@ -26,7 +26,27 @@ import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
 
 const disconnectTimestamps = [];
 
-const baileysLogger = pino({ level: "warn" });
+const baileysLogger = pino({
+  level: "warn",
+  serializers: {
+    err: pino.stdSerializers.err,
+    error: (err) => {
+      if (!err) return err;
+      if (err instanceof Error) {
+        return pino.stdSerializers.err(err);
+      }
+      if (typeof err === "object") {
+        return {
+          message: err.message || String(err),
+          stack: err.stack,
+          code: err.code,
+          ...err,
+        };
+      }
+      return { message: String(err) };
+    },
+  },
+});
 
 const RECONNECT_BASE_DELAY_MS = 5000;
 const RECONNECT_MAX_DELAY_MS = 120000;
@@ -507,50 +527,73 @@ export async function initWhatsappBot({
             const contextNormalized = normalizeText(`${groupName} ${text}`);
             const normalizedDetectedStore = normalizeText(detectedStore);
 
-            for (const couponItem of coupons) {
-              const result = repo.upsertCoupon({
-                code: couponItem.code,
-                groupId: chatId,
-                groupName,
-                messageText: text.substring(0, 500),
-                isExhausted,
-                storeName: detectedStore,
-              });
+            for (const rawCouponItem of coupons) {
+              try {
+                const couponItem =
+                  typeof rawCouponItem === "string"
+                    ? { code: rawCouponItem }
+                    : rawCouponItem;
 
-              // Dispara somente quando o cupom eh novo globalmente e ainda ativo
-              if (!result.isNewGlobal || isExhausted) {
-                continue;
-              }
+                if (!couponItem || !couponItem.code) {
+                  continue;
+                }
 
-              repo.incrementCouponStoreMetric(detectedStore, "detected", 1);
-
-              const interestedUsers = allCouponInterests.filter((interest) => {
-                const byContext = contextNormalized.includes(
-                  interest.store_normalized,
-                );
-                const byDetectedStore =
-                  normalizedDetectedStore !== "loja nao identificada" &&
-                  interest.store_normalized === normalizedDetectedStore;
-                return byContext || byDetectedStore;
-              });
-
-              if (interestedUsers.length > 0) {
-                repo.incrementCouponStoreMetric(detectedStore, "matched", 1);
-              }
-
-              for (const interest of interestedUsers) {
-                const couponAlert = buildCouponAlertMessage({
-                  couponItem,
+                const result = repo.upsertCoupon({
+                  code: couponItem.code,
+                  groupId: chatId,
                   groupName,
-                  detectedStore,
-                  interestStoreName: interest.store_name,
-                  alertMode: interest.alert_mode,
+                  messageText: text ? text.substring(0, 500) : null,
+                  isExhausted,
+                  storeName: detectedStore,
                 });
 
-                dispatchQueue.enqueue({
-                  chatId: interest.user_id,
-                  text: couponAlert,
-                  context: "coupon_alert",
+                if (result.skipped) {
+                  continue;
+                }
+
+                // Dispara somente quando o cupom eh novo globalmente e ainda ativo
+                if (!result.isNewGlobal || isExhausted) {
+                  continue;
+                }
+
+                repo.incrementCouponStoreMetric(detectedStore, "detected", 1);
+
+                const interestedUsers = allCouponInterests.filter((interest) => {
+                  const byContext = contextNormalized.includes(
+                    interest.store_normalized,
+                  );
+                  const byDetectedStore =
+                    normalizedDetectedStore !== "loja nao identificada" &&
+                    interest.store_normalized === normalizedDetectedStore;
+                  return byContext || byDetectedStore;
+                });
+
+                if (interestedUsers.length > 0) {
+                  repo.incrementCouponStoreMetric(detectedStore, "matched", 1);
+                }
+
+                for (const interest of interestedUsers) {
+                  const couponAlert = buildCouponAlertMessage({
+                    couponItem,
+                    groupName,
+                    detectedStore,
+                    interestStoreName: interest.store_name,
+                    alertMode: interest.alert_mode,
+                  });
+
+                  dispatchQueue.enqueue({
+                    chatId: interest.user_id,
+                    text: couponAlert,
+                    context: "coupon_alert",
+                  });
+                }
+              } catch (couponErr) {
+                console.error("[WhatsApp] Erro ao processar cupom individual:", {
+                  message: couponErr.message,
+                  stack: couponErr.stack,
+                  code: couponErr.code,
+                  rawCouponItem,
+                  chatId,
                 });
               }
             }

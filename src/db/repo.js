@@ -7,6 +7,11 @@ export function createRepo(db) {
     return normalized === "compact" ? "compact" : "full";
   };
 
+  const sanitizeSqliteString = (value) => {
+    if (value === null || value === undefined) return "";
+    return String(value).replace(/\0/g, "");
+  };
+
   const upsertUserStmt = db.prepare(`
     INSERT INTO users (chat_id, name, is_active)
     VALUES (?, ?, 1)
@@ -422,11 +427,11 @@ export function createRepo(db) {
   `);
 
   const incrementCouponStoreMetricTx = db.transaction((storeName, eventType, amount = 1) => {
-    const safeStoreName = String(storeName || "Loja nao identificada").trim() || "Loja nao identificada";
-    const storeNormalized = normalizeText(safeStoreName) || "loja nao identificada";
+    const rawSafeStore = sanitizeSqliteString(storeName).trim() || "Loja nao identificada";
+    const storeNormalized = normalizeText(rawSafeStore) || "loja nao identificada";
     const safeAmount = Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1;
 
-    upsertCouponStoreMetricStmt.run(storeNormalized, safeStoreName);
+    upsertCouponStoreMetricStmt.run(storeNormalized, rawSafeStore);
 
     if (eventType === "detected") {
       incrementDetectedMetricStmt.run(safeAmount, storeNormalized);
@@ -587,8 +592,24 @@ export function createRepo(db) {
       return listAllKeywordsStmt.all();
     },
     markOfferAsProcessed(hashId) {
-      const result = insertProcessedOfferStmt.run(hashId);
-      return result.changes > 0;
+      if (!hashId || typeof hashId !== "string") return false;
+      const cleanHash = sanitizeSqliteString(hashId).trim();
+      if (!cleanHash) return false;
+      try {
+        const result = insertProcessedOfferStmt.run(cleanHash);
+        return result.changes > 0;
+      } catch (err) {
+        if (err.code === "SQLITE_CONSTRAINT_PRIMARYKEY" || err.message?.includes("UNIQUE")) {
+          return false;
+        }
+        console.error("[SQLite Repo] Erro ao marcar oferta como processada:", {
+          message: err.message,
+          stack: err.stack,
+          code: err.code,
+          hashId: cleanHash,
+        });
+        return false;
+      }
     },
     cleanupProcessedOffers(maxAgeDays = 7) {
       const safeDays = Number.isFinite(maxAgeDays) ? Math.max(1, Math.floor(maxAgeDays)) : 7;
@@ -646,23 +667,62 @@ export function createRepo(db) {
     normalizeStoredKeywords() {
       return normalizeStoredKeywordsTx();
     },
-    upsertCoupon({ code, groupId, groupName, messageText, isExhausted, storeName }) {
-      const normalized = normalizeText(code);
-      const existing = findCouponByKeyStmt.get(normalized, groupId);
-      const existingGlobal = findCouponByCodeStmt.get(normalized);
-      upsertCouponStmt.run(
-        code,
-        normalized,
-        groupId,
-        groupName || null,
-        messageText || null,
-        isExhausted ? 1 : 0,
-        storeName || "Desconhecido"
-      );
-      return {
-        isNewGroup: !existing,
-        isNewGlobal: !existingGlobal,
-      };
+    upsertCoupon(payload) {
+      if (!payload || typeof payload !== "object") {
+        return { isNewGroup: false, isNewGlobal: false, skipped: true, reason: "invalid_payload" };
+      }
+
+      const { code, groupId, groupName, messageText, isExhausted, storeName } = payload;
+      const cleanCode = sanitizeSqliteString(code).trim();
+      if (!cleanCode) {
+        return { isNewGroup: false, isNewGlobal: false, skipped: true, reason: "empty_code" };
+      }
+
+      const normalized = normalizeText(cleanCode);
+      if (!normalized) {
+        return { isNewGroup: false, isNewGlobal: false, skipped: true, reason: "empty_normalized_code" };
+      }
+
+      const cleanGroupId = sanitizeSqliteString(groupId).trim();
+      if (!cleanGroupId) {
+        return { isNewGroup: false, isNewGlobal: false, skipped: true, reason: "empty_group_id" };
+      }
+
+      const cleanGroupName = groupName ? sanitizeSqliteString(groupName).trim() : null;
+      const cleanMessageText = messageText ? sanitizeSqliteString(messageText).substring(0, 500) : null;
+      const cleanStoreName = storeName ? sanitizeSqliteString(storeName).trim() || "Desconhecido" : "Desconhecido";
+
+      try {
+        const existing = findCouponByKeyStmt.get(normalized, cleanGroupId);
+        const existingGlobal = findCouponByCodeStmt.get(normalized);
+        upsertCouponStmt.run(
+          cleanCode,
+          normalized,
+          cleanGroupId,
+          cleanGroupName,
+          cleanMessageText,
+          isExhausted ? 1 : 0,
+          cleanStoreName
+        );
+        return {
+          isNewGroup: !existing,
+          isNewGlobal: !existingGlobal,
+        };
+      } catch (err) {
+        console.error("[SQLite Repo] Erro ao persistir cupom:", {
+          message: err.message,
+          stack: err.stack,
+          code: err.code,
+          couponCode: cleanCode,
+          groupId: cleanGroupId,
+        });
+        return {
+          isNewGroup: false,
+          isNewGlobal: false,
+          skipped: true,
+          error: err.message,
+        };
+      }
     },
     listRecentCoupons(limit = 10) {
       return listRecentCouponsStmt.all(limit);
@@ -689,7 +749,17 @@ export function createRepo(db) {
       return listAllCouponInterestsStmt.all();
     },
     incrementCouponStoreMetric(storeName, eventType, amount = 1) {
-      incrementCouponStoreMetricTx(storeName, eventType, amount);
+      try {
+        incrementCouponStoreMetricTx(storeName, eventType, amount);
+      } catch (err) {
+        console.error("[SQLite Repo] Erro em transação de métricas de cupom (rollback):", {
+          message: err.message,
+          stack: err.stack,
+          code: err.code,
+          storeName,
+          eventType,
+        });
+      }
     },
     listCouponStoreMetrics(limit = 10) {
       return listCouponStoreMetricsStmt.all(limit);
