@@ -3,8 +3,8 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { useSqliteAuthState } from "./sqliteAuthState.js";
+import { createBaileysLogger } from "./baileysLogger.js";
 import path from "node:path";
-import pino from "pino";
 import qrcode from "qrcode-terminal";
 import { BOT_CONFIG } from "../config.js";
 import {
@@ -26,27 +26,7 @@ import { handleUnmappedPrivateMessage } from "./unmappedMessageHandler.js";
 
 const disconnectTimestamps = [];
 
-const baileysLogger = pino({
-  level: "warn",
-  serializers: {
-    err: pino.stdSerializers.err,
-    error: (err) => {
-      if (!err) return err;
-      if (err instanceof Error) {
-        return pino.stdSerializers.err(err);
-      }
-      if (typeof err === "object") {
-        return {
-          message: err.message || String(err),
-          stack: err.stack,
-          code: err.code,
-          ...err,
-        };
-      }
-      return { message: String(err) };
-    },
-  },
-});
+const baileysLogger = createBaileysLogger({ level: "warn" });
 
 const RECONNECT_BASE_DELAY_MS = 5000;
 const RECONNECT_MAX_DELAY_MS = 120000;
