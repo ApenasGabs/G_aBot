@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import assert from "node:assert/strict";
 import test from "node:test";
-import pino from "pino";
+import { createBaileysLogger } from "../src/bot/baileysLogger.js";
 import { createRepo } from "../src/db/repo.js";
 import { setupDatabase } from "../src/db/schema.js";
 
@@ -208,45 +208,64 @@ test("repo.incrementCouponStoreMetric trata caracteres nulos sem falhar a transa
   db.close();
 });
 
-test("logger com serializer de error serializa message e stack em vez de objeto vazio", () => {
-  let loggedOutput = "";
+test("createBaileysLogger serializa erros reais de SQLite/transacao em level 50 com message e stack", () => {
+  const chunks = [];
   const customStream = {
     write: (chunk) => {
-      loggedOutput += chunk;
+      chunks.push(chunk);
     },
   };
 
-  const testLogger = pino(
-    {
-      level: "warn",
-      serializers: {
-        err: pino.stdSerializers.err,
-        error: (err) => {
-          if (!err) return err;
-          if (err instanceof Error) {
-            return pino.stdSerializers.err(err);
-          }
-          if (typeof err === "object") {
-            return {
-              message: err.message || String(err),
-              stack: err.stack,
-              code: err.code,
-              ...err,
-            };
-          }
-          return { message: String(err) };
-        },
-      },
-    },
-    customStream
-  );
+  const testLogger = createBaileysLogger({ level: "warn" }, customStream);
+  const childLogger = testLogger.child({ class: "baileys" });
 
-  const testErr = new Error("transaction failed, rolling back");
-  testLogger.error({ error: testErr }, "transaction failed, rolling back");
+  const sqliteErr = Object.assign(new Error("SQLITE_BUSY: database is locked"), {
+    code: "SQLITE_BUSY",
+  });
+  childLogger.error({ error: sqliteErr }, "transaction failed, rolling back");
 
-  const parsed = JSON.parse(loggedOutput.trim());
+  assert.equal(chunks.length, 1);
+  const parsed = JSON.parse(chunks[0].trim());
+  assert.equal(parsed.level, 50);
   assert.equal(parsed.msg, "transaction failed, rolling back");
   assert.ok(parsed.error);
-  assert.equal(parsed.error.message, "transaction failed, rolling back");
-  assert.ok(parsed.error.stack.includes("Error: transaction failed, rolling back"));
+  assert.equal(parsed.error.message, "SQLITE_BUSY: database is locked");
+  assert.equal(parsed.error.code, "SQLITE_BUSY");
+  assert.ok(parsed.error.stack.includes("SQLITE_BUSY: database is locked"));
+});
+
+test("createBaileysLogger rebaixa falsos-positivos de sessao Signal (@lid skmsg) de error para debug", () => {
+  const warnChunks = [];
+  const warnLogger = createBaileysLogger(
+    { level: "warn" },
+    { write: (chunk) => warnChunks.push(chunk) }
+  ).child({ class: "baileys" });
+
+  const signalMissErr = new Error("No session found to decrypt message");
+
+  // Ambos os logs disparados pelo Baileys em GroupCipher.decrypt (@lid skmsg) devem ser silenciados em level=warn
+  warnLogger.error({ error: signalMissErr }, "transaction failed, rolling back");
+  warnLogger.error(
+    {
+      key: { remoteJid: "120363424459533668@g.us", participant: "232126070919187@lid" },
+      err: signalMissErr,
+      messageType: "skmsg",
+    },
+    "failed to decrypt message"
+  );
+
+  assert.equal(warnChunks.length, 0);
+
+  // Quando level=debug, continuam inspecionáveis em level 20
+  const debugChunks = [];
+  const debugLogger = createBaileysLogger(
+    { level: "debug" },
+    { write: (chunk) => debugChunks.push(chunk) }
+  );
+  debugLogger.error({ error: signalMissErr }, "transaction failed, rolling back");
+
+  assert.equal(debugChunks.length, 1);
+  const parsedDebug = JSON.parse(debugChunks[0].trim());
+  assert.equal(parsedDebug.level, 20);
+  assert.equal(parsedDebug.msg, "transaction failed, rolling back");
 });
