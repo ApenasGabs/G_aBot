@@ -121,6 +121,12 @@ async function main() {
         }
         return wppClient.sendAdminMessage(text);
       },
+      sendDirectMessage: async (to, text) => {
+        if (!wppClient?.sendDirectMessage) {
+          return { ok: false, error: "Bot WhatsApp ainda inicializando." };
+        }
+        return wppClient.sendDirectMessage(to, text);
+      },
       supabaseConfigured: Boolean(SUPABASE_CONFIG.url && SUPABASE_CONFIG.key),
     });
   }

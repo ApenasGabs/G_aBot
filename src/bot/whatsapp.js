@@ -1,6 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  WAMessageStubType,
 } from "@whiskeysockets/baileys";
 import { useSqliteAuthState } from "./sqliteAuthState.js";
 import { createBaileysLogger } from "./baileysLogger.js";
@@ -31,6 +32,133 @@ const baileysLogger = createBaileysLogger({ level: "warn" });
 const RECONNECT_BASE_DELAY_MS = 5000;
 const RECONNECT_MAX_DELAY_MS = 120000;
 const FAST_RECONNECT_DELAY_MS = 2000;
+const CIPHERTEXT_STUB_TYPE = WAMessageStubType?.CIPHERTEXT ?? 2;
+const PRIVATE_CIPHERTEXT_MAX_AGE_SECONDS = 120;
+const PRIVATE_CIPHERTEXT_COOLDOWN_MS = 5 * 60 * 1000;
+
+export const PRIVATE_SESSION_RECOVERY_MESSAGE = [
+  "⚠️ Recebi sua mensagem, mas o WhatsApp ainda estava sincronizando a criptografia desta nova conversa.",
+  "",
+  "Por favor, envie seu comando novamente (ex: *menu* ou */*).",
+].join("\n");
+
+/**
+ * Trata stubs `CIPHERTEXT` em conversas privadas 1:1 quando um novo contato envia
+ * mensagem sem sessão Signal estabelecida com o companion device (e o aparelho
+ * principal não responde ao Placeholder Resend PDO).
+ *
+ * Força `assertSessions` e envia um aviso único (com cooldown por contato), o que
+ * estabelece imediatamente a sessão Signal de saída/entrada com o remetente.
+ *
+ * @param {Object} options
+ * @returns {Promise<{ recovered: boolean, reason?: string, targetJid?: string }>}
+ */
+export const handlePrivateCiphertextStub = async ({
+  msg,
+  chatId,
+  client,
+  logsUsersDir,
+  cooldownMap,
+  cooldownMs = PRIVATE_CIPHERTEXT_COOLDOWN_MS,
+  maxAgeSeconds = PRIVATE_CIPHERTEXT_MAX_AGE_SECONDS,
+  nowMs = Date.now(),
+}) => {
+  if (!msg || msg.key?.fromMe || msg.message) {
+    return { recovered: false, reason: "not_stub" };
+  }
+
+  if (msg.messageStubType !== CIPHERTEXT_STUB_TYPE) {
+    return { recovered: false, reason: "not_ciphertext" };
+  }
+
+  const normalizedChatId = String(chatId || msg.key?.remoteJid || "").trim();
+  if (
+    !normalizedChatId ||
+    normalizedChatId.endsWith("@g.us") ||
+    normalizedChatId.endsWith("@broadcast") ||
+    normalizedChatId.endsWith("@newsletter")
+  ) {
+    return { recovered: false, reason: "not_private" };
+  }
+
+  const rawTs = msg.messageTimestamp;
+  const msgTsSeconds = typeof rawTs === "number" ? rawTs : Number(rawTs);
+  if (Number.isFinite(msgTsSeconds) && msgTsSeconds > 0) {
+    const ageSeconds = Math.floor(nowMs / 1000) - msgTsSeconds;
+    if (ageSeconds > maxAgeSeconds) {
+      return { recovered: false, reason: "stale_message" };
+    }
+  }
+
+  if (cooldownMap instanceof Map) {
+    for (const [jid, ts] of cooldownMap.entries()) {
+      if (nowMs - ts >= cooldownMs) {
+        cooldownMap.delete(jid);
+      }
+    }
+    const lastAttempt = cooldownMap.get(normalizedChatId);
+    if (typeof lastAttempt === "number" && nowMs - lastAttempt < cooldownMs) {
+      return { recovered: false, reason: "cooldown" };
+    }
+    cooldownMap.set(normalizedChatId, nowMs);
+  }
+
+  const altJid = String(msg.key?.remoteJidAlt || "").trim();
+  const candidateJids = [normalizedChatId, altJid].filter(
+    (jid, idx, arr) =>
+      Boolean(jid) &&
+      !jid.endsWith("@g.us") &&
+      !jid.endsWith("@broadcast") &&
+      !jid.endsWith("@newsletter") &&
+      arr.indexOf(jid) === idx,
+  );
+
+  if (typeof client?.assertSessions === "function" && candidateJids.length > 0) {
+    try {
+      await client.assertSessions(candidateJids, true);
+    } catch (assertErr) {
+      console.warn(
+        `[SESSION RECOVERY] Falha parcial em assertSessions para ${normalizedChatId}: ${assertErr.message}`,
+      );
+    }
+  }
+
+  let deliveredJid = null;
+  let lastSendError = null;
+  for (const targetJid of candidateJids) {
+    try {
+      await client.sendMessage(targetJid, { text: PRIVATE_SESSION_RECOVERY_MESSAGE });
+      deliveredJid = targetJid;
+      break;
+    } catch (sendErr) {
+      lastSendError = sendErr;
+    }
+  }
+
+  if (!deliveredJid) {
+    console.warn(
+      `[SESSION RECOVERY] Nao foi possivel enviar aviso de recuperacao para ${normalizedChatId}: ${lastSendError?.message || "erro desconhecido"}`,
+    );
+    return { recovered: false, reason: "send_failed" };
+  }
+
+  console.warn(
+    `[SESSION RECOVERY] Sessao Signal renegociada e aviso enviado para ${deliveredJid} (stubParams=${JSON.stringify(msg.messageStubParameters || [])})`,
+  );
+
+  if (logsUsersDir) {
+    await logUserMessage(logsUsersDir, {
+      userId: deliveredJid,
+      userName: msg.pushName || null,
+      direction: "out",
+      context: "session_recovery",
+      messageType: "text",
+      text: PRIVATE_SESSION_RECOVERY_MESSAGE,
+    }).catch(() => {});
+  }
+
+  return { recovered: true, targetJid: deliveredJid };
+}
 
 const formatCurrencyBRL = (cents) => {
   if (!Number.isFinite(cents) || cents <= 0) return "R$ 0,00";
@@ -93,6 +221,7 @@ export async function initWhatsappBot({
   let lastDisconnectReason = null;
   const groupNameCache = new Map();
   const privateUserNameCache = new Map();
+  const ciphertextRecoveryCooldowns = new Map();
 
   const connect = async () => {
     // Carregar auth state do SQLite
@@ -268,10 +397,27 @@ export async function initWhatsappBot({
       if (type !== "notify" && type !== "append") return;
 
       for (const msg of messages) {
-        if (!msg.message || msg.key.fromMe) continue;
+        if (msg.key?.fromMe) continue;
 
-        const chatId = msg.key.remoteJid ?? "";
+        const chatId = msg.key?.remoteJid ?? "";
         const isGroup = chatId.endsWith("@g.us");
+        const isBroadcast = chatId.endsWith("@broadcast");
+        const isNewsletter = chatId.endsWith("@newsletter");
+        const isMonitoredChannel = isGroup || isNewsletter;
+        const isPrivate = Boolean(chatId) && !isGroup && !isBroadcast && !isNewsletter;
+
+        if (!msg.message) {
+          if (isPrivate && msg.messageStubType === CIPHERTEXT_STUB_TYPE) {
+            await handlePrivateCiphertextStub({
+              msg,
+              chatId,
+              client,
+              logsUsersDir,
+              cooldownMap: ciphertextRecoveryCooldowns,
+            });
+          }
+          continue;
+        }
 
         if (isGroup && chatId !== BOT_CONFIG.adminGroupId) {
           const messageTimestamp = typeof msg.messageTimestamp === "number"
@@ -287,11 +433,6 @@ export async function initWhatsappBot({
             continue;
           }
         }
-
-        const isBroadcast = chatId.endsWith("@broadcast");
-        const isNewsletter = chatId.endsWith("@newsletter");
-        const isMonitoredChannel = isGroup || isNewsletter;
-        const isPrivate = !isGroup && !isBroadcast && !isNewsletter;
 
         const text = extractMessageText(msg.message).trim();
         if (!text) continue;
@@ -676,6 +817,26 @@ export async function initWhatsappBot({
       }
       await client.sendMessage(BOT_CONFIG.adminGroupId, { text });
       return { ok: true };
+    },
+    sendDirectMessage: async (targetJid, text) => {
+      if (!client || !ready) {
+        return { ok: false, error: "Sessao WhatsApp reconectando ou offline." };
+      }
+      if (typeof client.assertSessions === "function") {
+        await client.assertSessions([targetJid], true).catch(() => {});
+      }
+      await client.sendMessage(targetJid, { text });
+      if (!targetJid.endsWith("@g.us")) {
+        await logUserMessage(logsUsersDir, {
+          userId: targetJid,
+          userName: privateUserNameCache.get(targetJid) ?? null,
+          direction: "out",
+          context: "admin_direct_send",
+          messageType: "text",
+          text,
+        }).catch(() => {});
+      }
+      return { ok: true, to: targetJid };
     },
     getHealthState: () => {
       const now = Date.now();

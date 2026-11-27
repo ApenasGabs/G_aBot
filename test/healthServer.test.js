@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   formatAdminNotificationPayload,
+  normalizeDirectRecipientJid,
   startHealthAndAdminServer,
   verifyBearerSecret,
 } from "../src/services/healthServer.js";
@@ -123,6 +124,71 @@ test("HTTP server exposes /healthz, /readyz states, and authenticated POST /api/
     assert.equal(authJson.delivered, true);
     assert.equal(sentMessages.length, 1);
     assert.equal(sentMessages[0], "🟡 Boletim SRE de teste");
+  } finally {
+    await srv.close();
+  }
+});
+
+test("normalizeDirectRecipientJid e POST /api/admin/send validam destino e entregam com autenticacao Bearer", async () => {
+  assert.equal(
+    normalizeDirectRecipientJid("+55 11 98164-0373"),
+    "5511981640373@s.whatsapp.net"
+  );
+  assert.equal(
+    normalizeDirectRecipientJid("105518773317706@lid"),
+    "105518773317706@lid"
+  );
+  assert.throws(() => normalizeDirectRecipientJid("123"), /invalido/i);
+  assert.throws(() => normalizeDirectRecipientJid("abc@invalid.domain"), /invalido/i);
+
+  const directDeliveries = [];
+  const srv = await startHealthAndAdminServer({
+    port: 0,
+    host: "127.0.0.1",
+    webhookSecret: "test_secret_token",
+    checkDatabase: () => ({ ok: true }),
+    getWhatsappState: () => ({ connected: true, loggedOut: false }),
+    sendDirectMessage: async (to, text) => {
+      directDeliveries.push({ to, text });
+      return { ok: true, to };
+    },
+  });
+
+  const baseUrl = `http://127.0.0.1:${srv.port}`;
+
+  try {
+    const unauth = await fetch(`${baseUrl}/api/admin/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: "+55 11 98164-0373", text: "Menu" }),
+    });
+    assert.equal(unauth.status, 401);
+
+    const badReq = await fetch(`${baseUrl}/api/admin/send`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test_secret_token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to: "invalid", text: "Menu" }),
+    });
+    assert.equal(badReq.status, 400);
+
+    const okRes = await fetch(`${baseUrl}/api/admin/send`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test_secret_token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to: "+55 11 98164-0373", text: "Olá! Digite menu." }),
+    });
+    assert.equal(okRes.status, 200);
+    const okJson = await okRes.json();
+    assert.equal(okJson.delivered, true);
+    assert.equal(okJson.to, "5511981640373@s.whatsapp.net");
+    assert.deepEqual(directDeliveries, [
+      { to: "5511981640373@s.whatsapp.net", text: "Olá! Digite menu." },
+    ]);
   } finally {
     await srv.close();
   }

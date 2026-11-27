@@ -269,3 +269,28 @@ test("createBaileysLogger rebaixa falsos-positivos de sessao Signal (@lid skmsg)
   assert.equal(parsedDebug.level, 20);
   assert.equal(parsedDebug.msg, "transaction failed, rolling back");
 });
+
+test("createBaileysLogger preserva visibilidade em warn (level 40) para falha de decriptacao em conversa privada 1:1", () => {
+  const warnChunks = [];
+  const warnLogger = createBaileysLogger(
+    { level: "warn" },
+    { write: (chunk) => warnChunks.push(chunk) }
+  ).child({ class: "baileys" });
+
+  const signalMissErr = new Error("No session found to decrypt message");
+
+  warnLogger.error(
+    {
+      key: { remoteJid: "105518773317706@lid" },
+      err: signalMissErr,
+      messageType: "pkmsg",
+    },
+    "failed to decrypt message"
+  );
+
+  assert.equal(warnChunks.length, 1);
+  const parsedWarn = JSON.parse(warnChunks[0].trim());
+  assert.equal(parsedWarn.level, 40);
+  assert.equal(parsedWarn.msg, "failed to decrypt message");
+  assert.equal(parsedWarn.key.remoteJid, "105518773317706@lid");
+});
