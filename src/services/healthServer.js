@@ -149,7 +149,7 @@ function sendJson(res, statusCode, body) {
  * @param {string} rawRecipient
  * @returns {string}
  */
-export function normalizeDirectRecipientJid(rawRecipient) {
+export const normalizeDirectRecipientJid = (rawRecipient) => {
   const trimmed = String(rawRecipient || "").trim();
   if (!trimmed) {
     throw new Error("Campo 'to' obrigatorio.");
@@ -417,7 +417,7 @@ export function startHealthAndAdminServer({
       server.removeListener("error", reject);
       const addr = server.address();
       const boundPort = typeof addr === "object" && addr ? addr.port : port;
-      console.log(`[HealthServer] Escutando em http://${host}:${boundPort} (/healthz, /readyz, /api/admin/notify, /api/admin/send)`);
+      console.log(`[HealthServer] Escutando em http://${host}:${boundPort} (/healthz, /readyz, /api/admin/notify)`);
       resolve({
         server,
         port: boundPort,

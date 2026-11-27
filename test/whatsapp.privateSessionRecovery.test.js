@@ -1,3 +1,7 @@
+/**
+ * @fileoverview Cobertura completa de testes automatizados (node --test) para
+ * recuperacao de sessao Signal 1:1 em stubs CIPHERTEXT de novos contatos.
+ */
 import assert from "node:assert/strict";
 import test from "node:test";
 import {

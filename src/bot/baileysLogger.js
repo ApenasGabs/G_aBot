@@ -51,7 +51,7 @@ const serializeErrorObject = (err) => {
  * @param {Record<string, any> | null | undefined} context
  * @returns {boolean}
  */
-export function isPrivateDirectDecryptionContext(context) {
+export const isPrivateDirectDecryptionContext = (context) => {
   if (!context || typeof context !== "object") return false;
   const messageType = String(context.messageType || "").toLowerCase();
   if (messageType === "skmsg") return false;

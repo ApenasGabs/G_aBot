@@ -53,7 +53,7 @@ export const PRIVATE_SESSION_RECOVERY_MESSAGE = [
  * @param {Object} options
  * @returns {Promise<{ recovered: boolean, reason?: string, targetJid?: string }>}
  */
-export async function handlePrivateCiphertextStub({
+export const handlePrivateCiphertextStub = async ({
   msg,
   chatId,
   client,
@@ -62,7 +62,7 @@ export async function handlePrivateCiphertextStub({
   cooldownMs = PRIVATE_CIPHERTEXT_COOLDOWN_MS,
   maxAgeSeconds = PRIVATE_CIPHERTEXT_MAX_AGE_SECONDS,
   nowMs = Date.now(),
-}) {
+}) => {
   if (!msg || msg.key?.fromMe || msg.message) {
     return { recovered: false, reason: "not_stub" };
   }

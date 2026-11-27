@@ -11,7 +11,7 @@ const MAX_MESSAGE_UNWRAP_DEPTH = 5;
  * @param {Record<string, any> | null | undefined} message
  * @returns {Record<string, any> | null | undefined}
  */
-export function unwrapMessageContent(message) {
+export const unwrapMessageContent = (message) => {
   if (!message || typeof message !== "object") {
     return message;
   }
