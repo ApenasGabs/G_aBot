@@ -45,11 +45,39 @@ const serializeErrorObject = (err) => {
 };
 
 /**
+ * Identifica se um contexto de erro de decriptação pertence a uma conversa privada 1:1
+ * (ex.: `@s.whatsapp.net` ou `@lid` fora de grupos/canais/broadcast).
+ *
+ * @param {Record<string, any> | null | undefined} context
+ * @returns {boolean}
+ */
+export function isPrivateDirectDecryptionContext(context) {
+  if (!context || typeof context !== "object") return false;
+  const messageType = String(context.messageType || "").toLowerCase();
+  if (messageType === "skmsg") return false;
+
+  const remoteJid = String(context.key?.remoteJid || context.sender || "").trim();
+  if (!remoteJid) return false;
+
+  if (
+    remoteJid.endsWith("@g.us") ||
+    remoteJid.endsWith("@broadcast") ||
+    remoteJid.endsWith("@newsletter")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Cria instância do logger Pino configurada para o Baileys:
  * - Serializa tanto `err` quanto `error` com message, stack e code;
  * - Rebaixa de `error` (50) para `debug` (20) rollbacks e falhas de decriptação
- *   causados exclusivamente por ausência transitória de sessão Signal (@lid / skmsg),
- *   preservando `level: 50` integral para falhas reais de SQLite ou exceções inesperadas.
+ *   causados por ausência transitória de sessão Signal em grupos/canais (@g.us / skmsg);
+ * - Em conversas privadas 1:1, rebaixa falhas de decriptação Signal apenas para `warn` (40),
+ *   mantendo observabilidade nos logs sem disparar falso alerta de erro fatal (50);
+ * - Preserva `level: 50` integral para falhas reais de SQLite ou exceções inesperadas.
  *
  * @param {import("pino").LoggerOptions} [options]
  * @param {import("pino").DestinationStream} [destination]
@@ -79,6 +107,12 @@ export function createBaileysLogger(options = {}, destination = undefined) {
             SIGNAL_ROLLBACK_OR_DECRYPT_MESSAGES.has(msg) &&
             isTransientSignalDecryptionError(underlyingError)
           ) {
+            if (
+              msg === "failed to decrypt message" &&
+              isPrivateDirectDecryptionContext(context)
+            ) {
+              return this.warn(...inputArgs);
+            }
             return this.debug(...inputArgs);
           }
         }

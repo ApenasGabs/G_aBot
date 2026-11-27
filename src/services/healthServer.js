@@ -143,7 +143,36 @@ function sendJson(res, statusCode, body) {
 }
 
 /**
- * Inicia servidor HTTP leve para /healthz, /readyz e POST /api/admin/notify.
+ * Normaliza um destinatário WhatsApp (telefone E.164/nacional com DDI ou JID explícito)
+ * para uso administrativo seguro.
+ *
+ * @param {string} rawRecipient
+ * @returns {string}
+ */
+export function normalizeDirectRecipientJid(rawRecipient) {
+  const trimmed = String(rawRecipient || "").trim();
+  if (!trimmed) {
+    throw new Error("Campo 'to' obrigatorio.");
+  }
+
+  if (trimmed.includes("@")) {
+    const validJid = /^[0-9a-zA-Z._:-]+@(s\.whatsapp\.net|lid|g\.us)$/.test(trimmed);
+    if (!validJid) {
+      throw new Error("JID de destino invalido.");
+    }
+    return trimmed;
+  }
+
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) {
+    throw new Error("Numero de telefone invalido. Informe DDI + DDD + numero (ex: 5511981640373).");
+  }
+
+  return `${digits}@s.whatsapp.net`;
+}
+
+/**
+ * Inicia servidor HTTP leve para /healthz, /readyz, POST /api/admin/notify e POST /api/admin/send.
  */
 export function startHealthAndAdminServer({
   port = 3091,
@@ -160,6 +189,7 @@ export function startHealthAndAdminServer({
     lastDisconnectReason: null,
   }),
   sendAdminMessage = async () => ({ ok: false, error: "not_initialized" }),
+  sendDirectMessage = async () => ({ ok: false, error: "not_initialized" }),
   supabaseConfigured = false,
 } = {}) {
   const server = http.createServer(async (req, res) => {
@@ -308,6 +338,76 @@ export function startHealthAndAdminServer({
       }
     }
 
+    // 4. Endpoint autenticado para envio ativo a um JID/numero especifico (ex.: destravar sessao 1:1)
+    if (req.method === "POST" && pathname === "/api/admin/send") {
+      if (!webhookSecret) {
+        return sendJson(res, 503, {
+          ok: false,
+          error: "GABOT_WEBHOOK_SECRET nao configurado no servidor.",
+        });
+      }
+
+      const authHeader = String(req.headers.authorization || "");
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7).trim()
+        : "";
+
+      if (!verifyBearerSecret(token, webhookSecret)) {
+        return sendJson(res, 401, {
+          ok: false,
+          error: "Token Bearer invalido ou ausente.",
+        });
+      }
+
+      let payload;
+      try {
+        payload = await readJsonBody(req);
+      } catch (err) {
+        return sendJson(res, err.statusCode || 400, {
+          ok: false,
+          error: err.message,
+        });
+      }
+
+      let targetJid;
+      try {
+        targetJid = normalizeDirectRecipientJid(payload?.to);
+      } catch (err) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: err.message,
+        });
+      }
+
+      const rawText = typeof payload?.text === "string" ? payload.text.trim() : "";
+      if (!rawText) {
+        return sendJson(res, 400, {
+          ok: false,
+          error: "Campo 'text' obrigatorio.",
+        });
+      }
+
+      try {
+        const result = await sendDirectMessage(targetJid, rawText.slice(0, 4000));
+        if (!result || result.ok === false) {
+          return sendJson(res, 503, {
+            ok: false,
+            error: result?.error || "Cliente WhatsApp indisponivel para envio.",
+          });
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          delivered: true,
+          to: result.to || targetJid,
+        });
+      } catch (err) {
+        return sendJson(res, 502, {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return sendJson(res, 404, { error: "Not Found" });
   });
 
@@ -317,7 +417,7 @@ export function startHealthAndAdminServer({
       server.removeListener("error", reject);
       const addr = server.address();
       const boundPort = typeof addr === "object" && addr ? addr.port : port;
-      console.log(`[HealthServer] Escutando em http://${host}:${boundPort} (/healthz, /readyz, /api/admin/notify)`);
+      console.log(`[HealthServer] Escutando em http://${host}:${boundPort} (/healthz, /readyz, /api/admin/notify, /api/admin/send)`);
       resolve({
         server,
         port: boundPort,
